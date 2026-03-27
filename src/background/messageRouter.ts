@@ -3,6 +3,7 @@ import type { SerializedWalletState } from '@shared/types';
 import { executeTransfer } from '@core/transfer';
 import { executeDustRegistration } from '@core/dustRegistration';
 import { executeDustDeregistration } from '@core/dustDeregistration';
+import { addTxHistoryEntry, getTxHistory } from '@shared/storage';
 import { handleApiCall } from './connectedApiHandler';
 import * as stateManager from './stateManager';
 import * as walletManager from './walletManager';
@@ -225,7 +226,9 @@ async function handlePopupMessage(
         const seed = await stateManager.switchEnvironment(msg.environment);
         if (seed) {
           const swInfo = await stateManager.getActiveWalletInfo();
-          await walletManager.initializeWallet(seed, msg.environment, 0, swInfo?.name ?? '');
+          await walletManager.initializeWallet(
+            seed, msg.environment, 0, swInfo?.name ?? '', msg.customUrls,
+          );
         } else {
           // No wallet for this environment — tell popup to show import
           await walletManager.stopWallet();
@@ -243,6 +246,12 @@ async function handlePopupMessage(
       case 'LOCK': {
         await walletManager.stopWallet();
         stateManager.lock();
+        break;
+      }
+
+      case 'GET_TX_HISTORY': {
+        const entries = await getTxHistory(0, 0, 50);
+        send({ type: 'TX_HISTORY', entries });
         break;
       }
 
@@ -273,6 +282,21 @@ async function handlePopupMessage(
           networkId,
           keystore ?? undefined,
         );
+        if (result.success) {
+          await addTxHistoryEntry({
+            txHash: result.txId,
+            status: 'pending',
+            timestamp: Date.now(),
+            accountIndex: 0,
+            type: 'transfer',
+            metadata: {
+              tokenType: msg.params.tokenType,
+              tokenId: msg.params.tokenId,
+              amount: msg.params.amount,
+              receiver: msg.params.receiverAddress,
+            },
+          });
+        }
         send({ type: 'TRANSFER_RESULT', result });
         break;
       }
@@ -294,6 +318,16 @@ async function handlePopupMessage(
           return msg.utxoIds.includes(id);
         });
         const regResult = await executeDustRegistration(facade2, { nightUtxos: [...selectedUtxos] }, keystore2);
+        if (regResult.success) {
+          await addTxHistoryEntry({
+            txHash: regResult.txId,
+            status: 'pending',
+            timestamp: Date.now(),
+            accountIndex: 0,
+            type: 'dustReg',
+            metadata: { utxoCount: selectedUtxos.length },
+          });
+        }
         send({ type: 'DUST_REGISTER_RESULT', result: regResult });
         break;
       }
@@ -315,6 +349,16 @@ async function handlePopupMessage(
           return msg.utxoIds.includes(id);
         });
         const deregResult = await executeDustDeregistration(facade3, { nightUtxos: [...deregUtxos] }, keystore3);
+        if (deregResult.success) {
+          await addTxHistoryEntry({
+            txHash: deregResult.txId,
+            status: 'pending',
+            timestamp: Date.now(),
+            accountIndex: 0,
+            type: 'dustDereg',
+            metadata: { utxoCount: deregUtxos.length },
+          });
+        }
         send({ type: 'DUST_DEREGISTER_RESULT', result: deregResult });
         break;
       }

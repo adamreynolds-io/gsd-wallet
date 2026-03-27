@@ -127,6 +127,10 @@ export function Onboarding() {
 
   return (
     <div className="flex flex-col h-full px-6 py-4 overflow-y-auto">
+      <div className="bg-amber-900/60 border border-amber-600/40 text-amber-200 text-xs px-3 py-1.5 text-center mb-4">
+        Developer/QA wallet only — do not use for real funds.
+      </div>
+
       {step === 'network' && (
         <div className="flex flex-col gap-4 flex-1 justify-center max-w-sm mx-auto w-full">
           <h2 className="text-xl font-bold text-white text-center mb-2">

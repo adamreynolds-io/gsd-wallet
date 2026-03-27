@@ -20,10 +20,24 @@ function sendRequest(payload: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const requestId = `gsd-${Date.now()}-${++requestCounter}`;
 
+    const timeout = setTimeout(() => {
+      window.removeEventListener('message', handleResponse);
+      const err = new Error('Request timed out after 30s') as Error & {
+        type: string;
+        code: string;
+        reason: string;
+      };
+      err.type = 'DAppConnectorAPIError';
+      err.code = 'InternalError';
+      err.reason = 'Request timed out after 30s';
+      reject(err);
+    }, 30_000);
+
     function handleResponse(event: MessageEvent) {
       if (event.source !== window) return;
       if (event.data?.source !== CONTENT_SOURCE) return;
       if (event.data?.requestId !== requestId) return;
+      clearTimeout(timeout);
       window.removeEventListener('message', handleResponse);
 
       const { payload: resp } = event.data;
@@ -160,5 +174,6 @@ if (!window.midnight) {
   window.midnight = {};
 }
 window.midnight[walletId] = initialApi;
+window.dispatchEvent(new CustomEvent('midnight#ready', { detail: { uuid: walletId } }));
 
 console.log('[GSD] Wallet injected as window.midnight.' + walletId);

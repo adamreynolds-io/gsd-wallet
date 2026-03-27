@@ -189,17 +189,32 @@ function serializeState(
       balances: shieldedBalances,
       coinCount: facadeState.shielded.availableCoins.length,
       syncPercent: Math.floor(shieldedPercent),
+      progress: {
+        applied: Number(sp.appliedIndex),
+        highest: Number(sp.highestRelevantWalletIndex),
+        connected: sp.isConnected,
+      },
     },
     unshielded: {
       address: unshieldedAddr,
       balances: unshieldedBalances,
       utxos,
       syncPercent: Math.floor(unshieldedPercent),
+      progress: {
+        applied: Number(up.appliedId),
+        highest: Number(up.highestTransactionId),
+        connected: up.isConnected,
+      },
     },
     dust: {
       address: dustAddr,
       balance: String(dustBal),
       syncPercent: Math.floor(dustPercent),
+      progress: {
+        applied: Number(dp.appliedIndex),
+        highest: Number(dp.highestRelevantWalletIndex),
+        connected: dp.isConnected,
+      },
     },
     overallSyncPercent,
     isSynced: reallySynced,
@@ -217,10 +232,19 @@ export async function initializeWallet(
   environment: Environment,
   accountIndex: number = 0,
   walletName: string = '',
+  customUrls?: {
+    nodeWsUrl: string;
+    indexerHttpUrl: string;
+    indexerWsUrl: string;
+    provingServerUrl: string;
+  },
 ): Promise<void> {
   await stopWallet();
 
   const envConfig = getEnvironmentConfig(environment);
+  const effectiveConfig = customUrls
+    ? { ...envConfig, ...customUrls }
+    : envConfig;
 
   const hdWallet = HDWallet.fromSeed(seed);
   if (hdWallet.type !== 'seedOk') {
@@ -246,17 +270,17 @@ export async function initializeWallet(
   );
   const unshieldedKeystore = createKeystore(
     derivationResult.keys[Roles.NightExternal],
-    envConfig.networkId,
+    effectiveConfig.networkId,
   );
 
   const config = {
-    networkId: envConfig.networkId,
+    networkId: effectiveConfig.networkId,
     indexerClientConnection: {
-      indexerHttpUrl: envConfig.indexerHttpUrl,
-      indexerWsUrl: envConfig.indexerWsUrl,
+      indexerHttpUrl: effectiveConfig.indexerHttpUrl,
+      indexerWsUrl: effectiveConfig.indexerWsUrl,
     },
-    provingServerUrl: new URL(envConfig.provingServerUrl),
-    relayURL: new URL(envConfig.nodeWsUrl),
+    provingServerUrl: new URL(effectiveConfig.provingServerUrl),
+    relayURL: new URL(effectiveConfig.nodeWsUrl),
     costParameters: { feeBlocksMargin: 5 },
     txHistoryStorage: new InMemoryTransactionHistoryStorage(),
   };
@@ -276,7 +300,7 @@ export async function initializeWallet(
         derivationResult.keys[Roles.Dust],
         ledger.LedgerParameters.initialParameters().dust,
       ),
-    provingService: () => makeServerProvingService({ provingServerUrl: new URL(envConfig.provingServerUrl) }),
+    provingService: () => makeServerProvingService({ provingServerUrl: new URL(effectiveConfig.provingServerUrl) }),
   });
 
   await facade.start(shieldedSecretKeys, dustSecretKey);
@@ -298,7 +322,7 @@ export async function initializeWallet(
 
   activeWallet = {
     facade,
-    networkId: envConfig.networkId,
+    networkId: effectiveConfig.networkId,
     secretKeys: { shieldedSecretKeys, dustSecretKey },
     unshieldedKeystore,
     environment,

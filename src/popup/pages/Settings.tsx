@@ -28,8 +28,19 @@ export function Settings() {
   }
 
   function handleApply() {
+    const defaults = ENVIRONMENTS[environment];
+    const urlsChanged =
+      customUrls.nodeWsUrl !== defaults.nodeWsUrl ||
+      customUrls.indexerHttpUrl !== defaults.indexerHttpUrl ||
+      customUrls.indexerWsUrl !== defaults.indexerWsUrl ||
+      customUrls.provingServerUrl !== defaults.provingServerUrl;
+
     const port = chrome.runtime.connect({ name: 'gsd-popup' });
-    port.postMessage({ type: 'SWITCH_ENVIRONMENT', environment });
+    port.postMessage({
+      type: 'SWITCH_ENVIRONMENT',
+      environment,
+      ...(urlsChanged ? { customUrls } : {}),
+    });
     showStatusMessage('Settings applied, restarting wallet...', 'info');
     port.disconnect();
     setTimeout(() => navigate('/dashboard'), 1500);
@@ -164,18 +175,6 @@ export function Settings() {
         Clear Wallet
       </button>
 
-      {/* Expand to full tab button */}
-      <button
-        className="btn-secondary text-sm mt-2"
-        onClick={() => {
-          chrome.tabs.create({
-            url: chrome.runtime.getURL('src/popup/index.html'),
-          });
-          window.close();
-        }}
-      >
-        Open in Full Tab
-      </button>
     </div>
   );
 }

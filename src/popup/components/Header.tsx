@@ -152,16 +152,6 @@ export function Header() {
           </select>
         )}
 
-        <button
-          onClick={() => {
-            chrome.tabs.create({ url: chrome.runtime.getURL('src/popup/index.html') });
-            window.close();
-          }}
-          className="p-1.5 rounded hover:bg-midnight-600 transition-colors text-gray-400 hover:text-white"
-          title="Open in full tab"
-        >
-          <ExpandIcon />
-        </button>
         {isActive && (
           <button
             onClick={() => navigate('/settings')}
@@ -173,17 +163,6 @@ export function Header() {
         )}
       </div>
     </header>
-  );
-}
-
-function ExpandIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="15 3 21 3 21 9" />
-      <polyline points="9 21 3 21 3 15" />
-      <line x1="21" y1="3" x2="14" y2="10" />
-      <line x1="3" y1="21" x2="10" y2="14" />
-    </svg>
   );
 }
 
