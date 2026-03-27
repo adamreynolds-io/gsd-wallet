@@ -86,7 +86,7 @@ const walletId = crypto.randomUUID();
 
 const initialApi = {
   rdns: 'io.shielded.gsd',
-  name: 'GSD Wallet',
+  name: 'Midnight GSD Wallet',
   icon: '',
   apiVersion: '4.0.1',
   async connect(networkId) {

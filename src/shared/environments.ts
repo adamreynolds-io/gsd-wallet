@@ -8,6 +8,7 @@ export const ENVIRONMENT_OPTIONS: Array<{
   value: Environment;
 }> = [
   { label: 'Mainnet', value: 'mainnet' },
+  { label: 'Mainnet (VPN)', value: 'mainnet-vpn' },
   { label: 'PreProd', value: 'preprod' },
   { label: 'Preview', value: 'preview' },
   { label: 'QANet', value: 'qanet' },
@@ -25,9 +26,20 @@ export function deriveIndexerWsUrl(httpUrl: string): string {
 export const ENVIRONMENTS: Record<Environment, EnvironmentConfig> = {
   mainnet: {
     networkId: NetworkId.NetworkId.MainNet,
-    indexerHttpUrl: 'TODO_ADD_URL',
-    indexerWsUrl: 'TODO_ADD_URL',
-    nodeWsUrl: 'TODO_ADD_URL',
+    indexerHttpUrl:
+      'https://indexer.mainnet.midnight.network/api/v4/graphql',
+    indexerWsUrl:
+      'wss://indexer.mainnet.midnight.network/api/v4/graphql/ws',
+    nodeWsUrl: 'wss://rpc.mainnet.midnight.network',
+    provingServerUrl: PROVING_SERVER_URL,
+  },
+  'mainnet-vpn': {
+    networkId: NetworkId.NetworkId.MainNet,
+    indexerHttpUrl:
+      'https://indexer.mainnet.midnight.network/api/v4/graphql',
+    indexerWsUrl:
+      'wss://indexer.mainnet.midnight.network/api/v4/graphql/ws',
+    nodeWsUrl: 'wss://td-rpc.mainnet.midnight.network',
     provingServerUrl: PROVING_SERVER_URL,
   },
   preprod: {

@@ -2,6 +2,7 @@ import type { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
 
 export type Environment =
   | 'mainnet'
+  | 'mainnet-vpn'
   | 'preprod'
   | 'preview'
   | 'qanet'
