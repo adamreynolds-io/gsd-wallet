@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "GSD Wallet",
+  "name": "Midnight GSD Wallet",
   "version": "0.1.0",
-  "description": "Get Shit Done — Midnight blockchain wallet",
+  "description": "Midnight GSD Wallet — Get Shit Done",
   "permissions": ["storage", "offscreen", "alarms", "activeTab"],
   "host_permissions": ["<all_urls>"],
   "background": {

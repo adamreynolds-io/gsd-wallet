@@ -84,7 +84,7 @@ export function Header() {
   return (
     <header className="flex items-center justify-between px-4 py-2 bg-midnight-800 border-b border-midnight-500">
       <div className="flex items-center gap-2">
-        <h1 className="text-lg font-bold text-white tracking-wide">GSD</h1>
+        <h1 className="text-lg font-bold text-white tracking-wide">Midnight GSD</h1>
         {isActive && (
           <select
             className="text-xs bg-midnight-600 text-gray-300 border border-midnight-400 rounded px-1.5 py-0.5 cursor-pointer focus:outline-none focus:border-accent-purple"
