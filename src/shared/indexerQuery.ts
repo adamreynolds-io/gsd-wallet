@@ -67,6 +67,7 @@ export async function fetchTxDetail(
   const config = getEnvironmentConfig(environment);
   const url = config.indexerHttpUrl;
 
+  console.log(`[GSD Explorer] Fetching tx ${txHash} from ${url}`);
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -76,11 +77,18 @@ export async function fetchTxDetail(
     }),
   });
 
-  if (!resp.ok) return null;
+  if (!resp.ok) {
+    console.error(`[GSD Explorer] HTTP ${resp.status}: ${resp.statusText}`);
+    return null;
+  }
 
   const json = await resp.json();
+  console.log('[GSD Explorer] Response:', JSON.stringify(json).slice(0, 200));
   const txs = json?.data?.transactions;
-  if (!txs || txs.length === 0) return null;
+  if (!txs || txs.length === 0) {
+    console.warn('[GSD Explorer] No transactions found for hash:', txHash);
+    return null;
+  }
 
   const tx = txs[0];
   return {

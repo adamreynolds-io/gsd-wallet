@@ -79,35 +79,6 @@ function serializeState(
   environment: Environment,
   accountIndex: number,
 ): SerializedWalletState {
-  // Debug: log raw state structure on each update
-  console.log('[GSD] FacadeState update:', {
-    isSynced: facadeState.isSynced,
-    shieldedBalances: facadeState.shielded.balances,
-    shieldedBalancesType: typeof facadeState.shielded.balances,
-    shieldedBalancesKeys: Object.keys(facadeState.shielded.balances),
-    unshieldedBalances: facadeState.unshielded.balances,
-    unshieldedBalancesType: typeof facadeState.unshielded.balances,
-    unshieldedBalancesKeys: Object.keys(facadeState.unshielded.balances),
-    unshieldedCoins: facadeState.unshielded.availableCoins.length,
-    shieldedCoins: facadeState.shielded.availableCoins.length,
-    shieldedProgress: {
-      applied: Number(facadeState.shielded.progress.appliedIndex),
-      highest: Number(facadeState.shielded.progress.highestRelevantWalletIndex),
-      highestIndex: Number(facadeState.shielded.progress.highestIndex),
-      connected: facadeState.shielded.progress.isConnected,
-    },
-    unshieldedProgress: {
-      applied: Number(facadeState.unshielded.progress.appliedId),
-      highest: Number(facadeState.unshielded.progress.highestTransactionId),
-      connected: facadeState.unshielded.progress.isConnected,
-    },
-    dustProgress: {
-      applied: Number(facadeState.dust.progress.appliedIndex),
-      highest: Number(facadeState.dust.progress.highestRelevantWalletIndex),
-      connected: facadeState.dust.progress.isConnected,
-    },
-  });
-
   const shieldedBalances: Record<string, string> = {};
   const rawShieldedBalances = facadeState.shielded.balances;
   for (const [tokenId, amount] of Object.entries(rawShieldedBalances)) {
@@ -337,14 +308,16 @@ export async function initializeWallet(
 
 export async function stopWallet(): Promise<void> {
   if (activeWallet) {
+    console.log('[GSD] Stopping wallet...');
     activeWallet.subscription.unsubscribe();
     try {
       await activeWallet.facade.stop();
-    } catch {
-      // Best-effort teardown
+    } catch (e) {
+      console.warn('[GSD] Facade stop error (ignored):', e);
     }
     activeWallet = null;
     chrome.alarms.clear('gsd-keepalive');
+    console.log('[GSD] Wallet stopped');
   }
 }
 

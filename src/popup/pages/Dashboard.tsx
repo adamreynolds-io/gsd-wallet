@@ -18,6 +18,9 @@ import type {
 
 type DebugTab = 'dust' | 'shielded' | 'unshielded' | 'txns';
 
+
+const isFullTab = window.innerWidth > 800;
+
 export function Dashboard() {
   const walletState = usePopupStore((s) => s.walletState);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -33,12 +36,22 @@ export function Dashboard() {
   const [inspectorHistory, setInspectorHistory] =
     useState<InspectorTarget[]>([]);
   const [inspectorData, setInspectorData] = useState<unknown>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  function targetToQuery(target: InspectorTarget): string {
+    switch (target.kind) {
+      case 'transaction': return target.hash;
+      case 'block': return String(target.height);
+      case 'contract': return target.address;
+    }
+  }
 
   function inspect(target: InspectorTarget) {
     if (inspectorTarget) {
       setInspectorHistory((h) => [...h, inspectorTarget]);
     }
     setInspectorTarget(target);
+    setSearchQuery(targetToQuery(target));
   }
 
   function inspectHash(hash: string) {
@@ -50,6 +63,7 @@ export function Dashboard() {
     if (prev) {
       setInspectorHistory((h) => h.slice(0, -1));
       setInspectorTarget(prev);
+      setSearchQuery(targetToQuery(prev));
     }
   }
 
@@ -57,6 +71,7 @@ export function Dashboard() {
     setInspectorTarget(null);
     setInspectorHistory([]);
     setInspectorData(null);
+    setSearchQuery('');
   }
 
   useEffect(() => {
@@ -99,24 +114,24 @@ export function Dashboard() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* ── Top: 2-column ── */}
-      <div className="flex-1 min-h-0 grid grid-cols-[260px_1fr] gap-3 p-3">
+      <div className={`flex gap-3 p-3 ${isFullTab ? 'min-h-[200px] max-h-[70%] shrink-0' : 'flex-1 min-h-0'}`}>
 
         {/* Left: wallet */}
-        <div className="flex flex-col gap-1.5 min-h-0">
-          <div className="bg-amber-900/60 border border-amber-600/40 text-amber-200 text-[10px] px-2 py-0.5 text-center rounded">
+        <div className="w-[260px] shrink-0 flex flex-col gap-1.5 min-h-0 overflow-hidden">
+          <div className="bg-amber-900/60 border border-amber-600/40 text-amber-200 text-xs px-2 py-0.5 text-center rounded">
             Dev wallet — seeds unencrypted
           </div>
 
           <div className="grid grid-cols-2 gap-1.5">
             <div className="bg-midnight-600 rounded px-2.5 py-2">
-              <div className="text-[8px] uppercase tracking-wider text-gray-500">NIGHT</div>
-              <div className="text-base font-mono text-white truncate" title={formatBigInt(nightBal, NIGHT_DENOMINATION)}>
+              <div className="text-xs uppercase tracking-wider text-gray-500">NIGHT</div>
+              <div className="text-lg font-mono text-white truncate" title={formatBigInt(nightBal, NIGHT_DENOMINATION)}>
                 {formatBigInt(nightBal, NIGHT_DENOMINATION)}
               </div>
             </div>
             <div className="bg-midnight-600 rounded px-2.5 py-2">
-              <div className="text-[8px] uppercase tracking-wider text-gray-500">DUST</div>
-              <div className="text-base font-mono text-white truncate" title={formatBigInt(dustBal, DUST_DENOMINATION)}>
+              <div className="text-xs uppercase tracking-wider text-gray-500">DUST</div>
+              <div className="text-lg font-mono text-white truncate" title={formatBigInt(dustBal, DUST_DENOMINATION)}>
                 {formatLargeNumber(BigInt(dustBal), DUST_DENOMINATION)}
               </div>
             </div>
@@ -128,7 +143,7 @@ export function Dashboard() {
                 <div className="h-full bg-gradient-to-r from-accent-purple to-accent-magenta rounded-full transition-[width] duration-300"
                   style={{ width: `${walletState.overallSyncPercent}%` }} />
               </div>
-              <span className="text-[9px] text-gray-500">{walletState.overallSyncPercent}%</span>
+              <span className="text-xs text-gray-500">{walletState.overallSyncPercent}%</span>
             </div>
           )}
 
@@ -146,7 +161,7 @@ export function Dashboard() {
             <button className="btn-secondary flex-1 text-xs !py-1.5" onClick={() => setDustMode('deregister')} title="Deregister">-Dereg</button>
           </div>
 
-          <div className="flex items-center justify-between shrink-0 text-[9px] pt-1 border-t border-midnight-500">
+          <div className="flex items-center justify-between shrink-0 text-xs pt-1 border-t border-midnight-500">
             <div className="flex items-center gap-2">
               <StatusDot label="Node" ok={walletState.connections.node} />
               <StatusDot label="Idx" ok={walletState.connections.indexer} />
@@ -159,16 +174,16 @@ export function Dashboard() {
         </div>
 
         {/* Right: debug tabs */}
-        <div className="flex flex-col min-h-0 bg-midnight-600 rounded-lg p-3">
+        <div className="flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden bg-midnight-600 rounded-lg p-3">
           <div className="flex items-center gap-1 mb-2 shrink-0">
             {(['dust', 'shielded', 'unshielded', 'txns'] as DebugTab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setDebugTab(t)}
-                className={`text-[10px] px-2 py-0.5 rounded font-mono ${
+                className={`text-xs px-2 py-0.5 rounded font-mono ${
                   debugTab === t
                     ? 'bg-accent-purple text-white'
-                    : 'bg-midnight-700 text-gray-400 hover:text-gray-200'
+                    : 'bg-midnight-800 text-gray-400 hover:text-gray-200'
                 }`}
               >
                 {t === 'txns'
@@ -181,38 +196,46 @@ export function Dashboard() {
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto">
-            {debugTab === 'dust' && <DustDebug state={walletState} onInspect={inspectHash} />}
+            {debugTab === 'dust' && <DustDebug state={walletState} />}
             {debugTab === 'shielded' && <ShieldedDebug state={walletState} />}
-            {debugTab === 'unshielded' && <UnshieldedDebug state={walletState} onInspect={inspectHash} />}
+            {debugTab === 'unshielded' && <UnshieldedDebug state={walletState} />}
             {debugTab === 'txns' && <TxHistoryTab entries={txHistory} onInspect={inspectHash} />}
           </div>
         </div>
       </div>
 
       {/* ── Bottom: Explorer panel (always visible) ── */}
-      <div className="h-[220px] shrink-0 bg-midnight-800 border-t border-midnight-500 flex flex-col">
+      <div className={`bg-midnight-900 border-t border-midnight-500 flex flex-col ${isFullTab ? 'flex-1 min-h-[150px]' : 'h-[280px] shrink-0'}`}>
         <div className="flex items-center gap-2 px-3 pt-1.5 pb-1 shrink-0">
-          <span className="text-[9px] uppercase tracking-wider text-gray-500">Explorer</span>
-          {inspectorTarget && (
-            <>
-              {inspectorHistory.length > 0 && (
-                <button
-                  onClick={inspectorBack}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-midnight-700 text-gray-400 hover:text-gray-200"
-                >
-                  Back
-                </button>
-              )}
-              <button
-                onClick={inspectorClose}
-                className="text-[10px] px-1.5 py-0.5 rounded bg-midnight-700 text-gray-400 hover:text-gray-200"
-              >
-                Clear
-              </button>
-            </>
+          <span className="text-xs uppercase tracking-wider text-gray-500">Explorer</span>
+          <ExplorerSearch
+            value={searchQuery}
+            onChange={setSearchQuery}
+            onSearch={(target) => {
+              setInspectorHistory([]);
+              setInspectorData(null);
+              setInspectorTarget(target);
+              setSearchQuery(targetToQuery(target));
+            }}
+          />
+          {inspectorHistory.length > 0 && (
+            <button
+              onClick={inspectorBack}
+              className="text-xs px-1.5 py-0.5 rounded bg-midnight-800 text-gray-400 hover:text-gray-200"
+            >
+              Back
+            </button>
+          )}
+          {inspectorTarget != null && (
+            <button
+              onClick={inspectorClose}
+              className="text-xs px-1.5 py-0.5 rounded bg-midnight-800 text-gray-400 hover:text-gray-200"
+            >
+              Clear
+            </button>
           )}
           <div className="flex-1" />
-          {inspectorTarget != null && inspectorData != null && (
+          {inspectorData != null && (
             <CopyBtn getData={() => JSON.stringify(inspectorData, null, 2)} />
           )}
         </div>
@@ -220,6 +243,7 @@ export function Dashboard() {
         <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-2">
           {inspectorTarget ? (
             <Inspector
+              key={targetToQuery(inspectorTarget)}
               target={inspectorTarget}
               environment={walletState.environment}
               onInspect={inspect}
@@ -244,7 +268,10 @@ export function Dashboard() {
 
 /* ── Address row ── */
 
-function AddrRow({ label, address }: { label: string; address: string }) {
+function AddrRow({ label, address }: {
+  label: string;
+  address: string;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = useCallback(async () => {
     await navigator.clipboard.writeText(address);
@@ -257,9 +284,11 @@ function AddrRow({ label, address }: { label: string; address: string }) {
     : address || '...';
 
   return (
-    <div className="flex items-center gap-1.5 text-[11px] bg-white/5 rounded px-2 py-1">
+    <div className="flex items-center gap-1.5 text-sm bg-white/5 rounded px-2 py-1">
       <span className="text-gray-500 w-14 shrink-0">{label}</span>
-      <span className="font-mono text-gray-300 truncate flex-1" title={address}>{short}</span>
+      <span className="font-mono text-gray-300 truncate flex-1" title={address}>
+        {short}
+      </span>
       <button onClick={copy} className="text-gray-400 hover:text-white shrink-0" title="Copy">
         {copied ? (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4caf50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
@@ -278,11 +307,11 @@ function TokenRows({ label, balances }: { label: string; balances: Record<string
   if (entries.length === 0) return null;
   return (
     <div>
-      <div className="text-[9px] uppercase tracking-wider text-gray-500 mb-0.5">{label}</div>
+      <div className="text-xs uppercase tracking-wider text-gray-500 mb-0.5">{label}</div>
       {entries.map(([tokenId, amount]) => {
         const isNight = tokenId === NIGHT_TOKEN_ID;
         return (
-          <div key={tokenId} className="flex justify-between text-[11px] px-1">
+          <div key={tokenId} className="flex justify-between text-sm px-1">
             <span className="text-gray-400 font-mono truncate mr-2">
               {isNight ? 'NIGHT' : `${tokenId.slice(0, 8)}...`}
             </span>
@@ -301,7 +330,7 @@ function TokenRows({ label, balances }: { label: string; balances: Record<string
 function SyncRow({ progress, percent }: { progress: SyncProgress; percent: number }) {
   return (
     <div className="mb-1.5">
-      <div className="flex justify-between text-[10px] text-gray-500 mb-0.5">
+      <div className="flex justify-between text-xs text-gray-500 mb-0.5">
         <span>{progress.connected ? 'Connected' : 'Disconnected'}</span>
         <span>{progress.applied} / {progress.highest} ({percent}%)</span>
       </div>
@@ -317,7 +346,7 @@ function SyncRow({ progress, percent }: { progress: SyncProgress; percent: numbe
 
 function KV({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex justify-between text-[11px]">
+    <div className="flex justify-between text-sm">
       <span className="text-gray-500">{k}</span>
       <span className="text-gray-200 font-mono">{v}</span>
     </div>
@@ -325,12 +354,11 @@ function KV({ k, v }: { k: string; v: string }) {
 }
 
 function Divider({ label }: { label: string }) {
-  return <div className="text-[9px] uppercase tracking-wider text-gray-500 pt-0.5">{label}</div>;
+  return <div className="text-xs uppercase tracking-wider text-gray-500 pt-0.5">{label}</div>;
 }
 
-function DustDebug({ state, onInspect }: {
+function DustDebug({ state }: {
   state: SerializedWalletState;
-  onInspect?: ((hash: string) => void) | undefined;
 }) {
   return (
     <div className="space-y-1">
@@ -338,7 +366,7 @@ function DustDebug({ state, onInspect }: {
       <KV k="Balance" v={formatLargeNumber(BigInt(state.dust.balance), DUST_DENOMINATION)} />
       <KV k="Address" v={trunc(state.dust.address)} />
       <Divider label={`UTXOs (${state.unshielded.utxos.length})`} />
-      <UtxoList utxos={state.unshielded.utxos} onInspect={onInspect ?? (() => {})} />
+      <UtxoList utxos={state.unshielded.utxos} />
     </div>
   );
 }
@@ -351,7 +379,7 @@ function ShieldedDebug({ state }: { state: SerializedWalletState }) {
       <KV k="Coins" v={String(state.shielded.coinCount)} />
       <Divider label="Balances" />
       {entries.length === 0 ? (
-        <div className="text-[11px] text-gray-500">None</div>
+        <div className="text-sm text-gray-500">None</div>
       ) : entries.map(([id, amt]) => (
         <KV key={id}
           k={id === NIGHT_TOKEN_ID ? 'NIGHT' : `${id.slice(0, 10)}...`}
@@ -362,9 +390,8 @@ function ShieldedDebug({ state }: { state: SerializedWalletState }) {
   );
 }
 
-function UnshieldedDebug({ state, onInspect }: {
+function UnshieldedDebug({ state }: {
   state: SerializedWalletState;
-  onInspect?: ((hash: string) => void) | undefined;
 }) {
   const entries = Object.entries(state.unshielded.balances);
   const reg = state.unshielded.utxos.filter((u) => u.registered);
@@ -377,7 +404,7 @@ function UnshieldedDebug({ state, onInspect }: {
       <KV k="Unregistered" v={String(unreg.length)} />
       <Divider label="Balances" />
       {entries.length === 0 ? (
-        <div className="text-[11px] text-gray-500">None</div>
+        <div className="text-sm text-gray-500">None</div>
       ) : entries.map(([id, amt]) => (
         <KV key={id}
           k={id === NIGHT_TOKEN_ID ? 'NIGHT' : `${id.slice(0, 10)}...`}
@@ -385,7 +412,7 @@ function UnshieldedDebug({ state, onInspect }: {
         />
       ))}
       <Divider label={`UTXOs (${state.unshielded.utxos.length})`} />
-      <UtxoList utxos={state.unshielded.utxos} onInspect={onInspect ?? (() => {})} />
+      <UtxoList utxos={state.unshielded.utxos} />
     </div>
   );
 }
@@ -395,17 +422,17 @@ function TxHistoryTab({ entries, onInspect }: {
   onInspect: (hash: string) => void;
 }) {
   if (entries.length === 0) {
-    return <div className="text-[11px] text-gray-500 py-4 text-center">No transactions yet</div>;
+    return <div className="text-sm text-gray-500 py-4 text-center">No transactions yet</div>;
   }
   return (
     <div className="space-y-1">
       {entries.map((tx) => (
-        <div key={tx.txHash} className="bg-midnight-700 rounded px-2 py-1">
-          <div className="flex items-center justify-between text-[11px]">
+        <div key={tx.txHash} className="bg-midnight-800 rounded px-2 py-1">
+          <div className="flex items-center justify-between text-sm">
             <span className="text-gray-300">{TX_TYPE_LABELS[tx.type] ?? tx.type}</span>
             <span className={TX_STATUS_COLORS[tx.status] ?? 'text-gray-400'}>{tx.status}</span>
           </div>
-          <div className="flex items-center justify-between text-[10px] mt-0.5">
+          <div className="flex items-center justify-between text-xs mt-0.5">
             <button onClick={() => onInspect(tx.txHash)}
               className="font-mono text-accent-purple hover:underline truncate mr-2 text-left" title="Inspect">
               {tx.txHash.slice(0, 16)}...{tx.txHash.slice(-8)}
@@ -418,35 +445,30 @@ function TxHistoryTab({ entries, onInspect }: {
   );
 }
 
-function UtxoList({ utxos, onInspect }: {
+function UtxoList({ utxos }: {
   utxos: SerializedUtxo[];
-  onInspect: (hash: string) => void;
 }) {
   if (utxos.length === 0) {
-    return <div className="text-[11px] text-gray-500">No UTXOs</div>;
+    return <div className="text-sm text-gray-500">No UTXOs</div>;
   }
   return (
     <div className="space-y-0.5">
-      {utxos.map((utxo) => {
-        const intentHash = utxo.id.split(':')[0] ?? '';
-        return (
-          <div key={utxo.id} className="flex items-center justify-between text-[10px] px-1.5 py-0.5 bg-midnight-700 rounded">
-            <button onClick={() => onInspect(intentHash)}
-              className="font-mono text-accent-purple hover:underline truncate mr-2 text-left" title="Inspect transaction">
+      {utxos.map((utxo) => (
+          <div key={utxo.id} className="flex items-center justify-between text-xs px-1.5 py-0.5 bg-midnight-800 rounded">
+            <span className="font-mono text-gray-400 truncate mr-2" title={utxo.id}>
               {utxo.id.slice(0, 24)}...
-            </button>
+            </span>
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="font-mono text-white">
                 {formatLargeNumber(BigInt(utxo.value), NIGHT_DENOMINATION)}
               </span>
-              <span className={`text-[8px] px-1 rounded ${utxo.registered ? 'bg-green-900/40 text-green-400' : 'bg-gray-700 text-gray-500'}`}
+              <span className={`text-xs px-1 rounded ${utxo.registered ? 'bg-green-900/40 text-green-400' : 'bg-gray-700 text-gray-500'}`}
                 title={utxo.registered ? 'Registered for dust generation' : 'Not registered'}>
                 {utxo.registered ? 'REG' : 'UNREG'}
               </span>
             </div>
           </div>
-        );
-      })}
+      ))}
     </div>
   );
 }
@@ -465,10 +487,10 @@ function CopyBtn({ getData }: { getData: () => string }) {
   return (
     <button
       onClick={() => { navigator.clipboard.writeText(getData()); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-      className="text-[9px] px-1.5 py-0.5 rounded bg-midnight-700 text-gray-500 hover:text-gray-200"
+      className="text-xs px-1.5 py-0.5 rounded bg-midnight-800 text-gray-500 hover:text-gray-200"
       title="Copy as JSON"
     >
-      {copied ? 'Copied!' : 'Copy'}
+      {copied ? 'Copied!' : 'Copy (JSON)'}
     </button>
   );
 }
@@ -514,6 +536,44 @@ function StatusDot({ label, ok }: { label: string; ok: boolean }) {
       <span className={`inline-block w-1.5 h-1.5 rounded-full ${ok ? 'bg-green-400 shadow-[0_0_4px_rgba(76,175,80,0.6)]' : 'bg-red-400 shadow-[0_0_4px_rgba(244,67,54,0.6)]'}`} />
       <span className="text-gray-500">{label}</span>
     </span>
+  );
+}
+
+function ExplorerSearch({ value, onChange, onSearch }: {
+  value: string;
+  onChange: (v: string) => void;
+  onSearch: (target: InspectorTarget) => void;
+}) {
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const q = value.trim();
+    if (!q) return;
+
+    if (/^\d+$/.test(q)) {
+      onSearch({ kind: 'block', height: Number(q) });
+    } else {
+      onSearch({ kind: 'transaction', hash: q });
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex items-center gap-1">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="tx hash, block height, or contract"
+        spellCheck={false}
+        autoComplete="off"
+        className="text-xs bg-midnight-900 border border-midnight-600 rounded px-2 py-0.5 text-gray-300 placeholder-gray-600 w-[260px] focus:border-accent-purple focus:outline-none"
+      />
+      <button
+        type="submit"
+        className="text-xs px-2 py-0.5 rounded bg-midnight-800 text-gray-400 hover:text-gray-200"
+      >
+        Go
+      </button>
+    </form>
   );
 }
 

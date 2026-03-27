@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { Header } from '@popup/components/Header';
 import { Unlock } from '@popup/pages/Unlock';
 import { Onboarding } from '@popup/pages/Onboarding';
@@ -13,10 +14,19 @@ export function App() {
   const status = usePopupStore((s) => s.status);
   const hasVault = usePopupStore((s) => s.hasVault);
 
+  useEffect(() => {
+    if (window.innerWidth > 800) {
+      document.body.style.width = '100vw';
+      document.body.style.height = '100vh';
+      document.body.style.maxWidth = '960px';
+      document.body.style.margin = '0 auto';
+    }
+  }, []);
+
   return (
     <div className="flex flex-col h-full">
       <Header />
-      <main className="flex-1 overflow-hidden flex flex-col">
+      <main className="flex-1 min-h-0 overflow-hidden flex flex-col">
         <Routes>
           <Route
             path="/"

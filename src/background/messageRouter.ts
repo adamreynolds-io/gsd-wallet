@@ -194,8 +194,9 @@ async function handlePopupMessage(
         try {
           const seed = new Uint8Array(msg.seed);
           await stateManager.addWallet(msg.name, seed, msg.environment);
-          await walletManager.initializeWallet(seed, msg.environment, 0, msg.name);
           send({ type: 'WALLET_ADDED', success: true });
+          walletManager.initializeWallet(seed, msg.environment, 0, msg.name)
+            .catch((err) => console.error('[GSD] Wallet init failed:', err));
         } catch (err) {
           send({
             type: 'WALLET_ADDED',

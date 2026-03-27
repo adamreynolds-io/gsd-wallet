@@ -46,10 +46,13 @@ export function Inspector({
 
     const fetchData = async () => {
       try {
-        let result: TxDetail | BlockDetail | ContractDetail | null;
+        let result: TxDetail | BlockDetail | ContractDetail | null = null;
         switch (target.kind) {
           case 'transaction':
             result = await fetchTxDetail(environment, target.hash);
+            if (!result) {
+              result = await fetchContractDetail(environment, target.hash);
+            }
             break;
           case 'block':
             result = await fetchBlockDetail(environment, target.height);
@@ -106,13 +109,13 @@ export function Inspector({
           {onBack && (
             <button
               onClick={onBack}
-              className="text-gray-400 hover:text-white text-[11px]"
+              className="text-gray-400 hover:text-white text-sm"
               title="Back"
             >
               &larr;
             </button>
           )}
-          <span className="text-[9px] uppercase tracking-wider text-gray-500">
+          <span className="text-xs uppercase tracking-wider text-gray-500">
             {title}
           </span>
         </div>
@@ -127,14 +130,14 @@ export function Inspector({
 
       {/* Identifier */}
       <div
-        className="font-mono text-[9px] text-gray-500 truncate mb-1.5"
+        className="font-mono text-xs text-gray-500 truncate mb-1.5"
         title={identifier}
       >
         {identifier}
       </div>
 
       {/* Content */}
-      <div className="overflow-y-auto max-h-[280px] space-y-1 text-[10px]">
+      <div className="overflow-y-auto max-h-[280px] space-y-1 text-xs">
         {loading && (
           <div className="text-gray-400 text-center py-2">
             Querying indexer...
@@ -143,21 +146,21 @@ export function Inspector({
         {error && (
           <div className="text-amber-400 text-center py-2">{error}</div>
         )}
-        {data && target.kind === 'transaction' && (
+        {data && isTxDetail(data) && (
           <TxDetailView
-            detail={data as TxDetail}
+            detail={data}
             onInspect={onInspect}
           />
         )}
-        {data && target.kind === 'block' && (
+        {data && isBlockDetail(data) && (
           <BlockDetailView
-            detail={data as BlockDetail}
+            detail={data}
             onInspect={onInspect}
           />
         )}
-        {data && target.kind === 'contract' && (
+        {data && isContractDetail(data) && (
           <ContractDetailView
-            detail={data as ContractDetail}
+            detail={data}
             onInspect={onInspect}
           />
         )}
@@ -170,7 +173,7 @@ export function Inspector({
             href={explorerUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[10px] text-accent-purple hover:underline"
+            className="text-xs text-accent-purple hover:underline"
           >
             Open in Explorer
           </a>
@@ -528,6 +531,18 @@ function statusToColor(status: string | null): string {
     default:
       return 'text-gray-400';
   }
+}
+
+function isTxDetail(d: unknown): d is TxDetail {
+  return d != null && typeof d === 'object' && 'hash' in d && 'feesPaid' in d && !('zswapState' in d);
+}
+
+function isBlockDetail(d: unknown): d is BlockDetail {
+  return d != null && typeof d === 'object' && 'height' in d && 'protocolVersion' in d;
+}
+
+function isContractDetail(d: unknown): d is ContractDetail {
+  return d != null && typeof d === 'object' && 'zswapState' in d;
 }
 
 function formatDust(value: string): string {

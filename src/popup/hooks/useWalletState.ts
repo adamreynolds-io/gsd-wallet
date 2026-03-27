@@ -14,7 +14,10 @@ export function useWalletConnection(): void {
 
     port.onMessage.addListener((msg: PopupResponse) => {
       if (msg.type === 'STATE_UPDATE') {
-        setWalletState(msg.state);
+        const { hasVault } = usePopupStore.getState();
+        if (hasVault !== false) {
+          setWalletState(msg.state);
+        }
       }
     });
 

@@ -45,11 +45,6 @@ setupMessageRouter();
 // Log lifecycle events for debugging
 console.log('[GSD] Service worker started');
 
-// Open wallet in full tab when extension icon is clicked
-chrome.action.onClicked.addListener(() => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('src/popup/index.html') });
-});
-
 // Handle install
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {

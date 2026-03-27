@@ -101,8 +101,9 @@ export function Onboarding() {
       port.onMessage.addListener((msg) => {
         setCreating(false);
         if (msg.type === 'WALLET_ADDED' && msg.success) {
-          setStatus('syncing');
-          showStatusMessage('Wallet created', 'success');
+          usePopupStore.getState().setHasVault(true);
+          setStatus('initializing');
+          showStatusMessage('Wallet syncing...', 'info');
           navigate('/dashboard');
         } else {
           setError(msg.error ?? 'Failed to create wallet');
