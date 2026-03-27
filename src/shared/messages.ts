@@ -1,0 +1,86 @@
+import type {
+  Environment,
+  SerializedWalletState,
+  TransactionResult,
+} from './types';
+
+// --- DApp <-> Service Worker (via content script bridge) ---
+
+export type DAppRequest =
+  | { type: 'GSD_CONNECT'; networkId: string; origin: string }
+  | {
+      type: 'GSD_API_CALL';
+      method: string;
+      args: unknown[];
+      sessionId: string;
+    }
+  | {
+      type: 'GSD_HINT_USAGE';
+      methodNames: string[];
+      sessionId: string;
+    };
+
+export type DAppResponse =
+  | { type: 'GSD_RESPONSE'; requestId: string; result: unknown }
+  | {
+      type: 'GSD_ERROR';
+      requestId: string;
+      error: { code: string; reason: string };
+    };
+
+// --- Popup <-> Service Worker ---
+
+export type PopupRequest =
+  | { type: 'GET_STATE' }
+  | { type: 'LOCK' }
+  | {
+      type: 'ADD_WALLET';
+      name: string;
+      seed: number[];
+      environment: Environment;
+    }
+  | { type: 'SWITCH_WALLET'; index: number }
+  | { type: 'SWITCH_ENVIRONMENT'; environment: Environment }
+  | { type: 'GET_WALLETS'; environment: Environment }
+  | { type: 'SEND_TRANSFER'; params: TransferRequest }
+  | { type: 'DUST_REGISTER'; utxoIds: string[]; receiverAddress?: string }
+  | { type: 'DUST_DEREGISTER'; utxoIds: string[] }
+  | { type: 'CHECK_HAS_WALLETS' }
+  | { type: 'CLEAR_ALL' };
+
+export type PopupResponse =
+  | { type: 'STATE_UPDATE'; state: SerializedWalletState }
+  | { type: 'WALLET_ADDED'; success: boolean; error?: string }
+  | { type: 'WALLETS_LIST'; wallets: Array<{ index: number; name: string }> }
+  | { type: 'TRANSFER_RESULT'; result: TransactionResult }
+  | { type: 'DUST_REGISTER_RESULT'; result: TransactionResult }
+  | { type: 'DUST_DEREGISTER_RESULT'; result: TransactionResult }
+  | { type: 'HAS_WALLETS'; exists: boolean }
+  | { type: 'ERROR'; error: string };
+
+export interface TransferRequest {
+  tokenType: 'shielded' | 'unshielded';
+  tokenId: string;
+  amount: string;
+  receiverAddress: string;
+}
+
+// --- Service Worker <-> Offscreen (proving) ---
+
+export type ProvingRequest = {
+  type: 'PROVE_REQUEST';
+  id: string;
+  transaction: string;
+};
+
+export type ProvingResponse =
+  | { type: 'PROVE_RESPONSE'; id: string; result: string }
+  | { type: 'PROVE_ERROR'; id: string; error: string };
+
+// --- Content Script bridge messages (window.postMessage) ---
+
+export interface BridgeMessage {
+  source: 'gsd-wallet-inpage' | 'gsd-wallet-content';
+  payload: DAppRequest | DAppResponse;
+  requestId: string;
+}

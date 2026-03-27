@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply m-0 p-0 font-sans antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+      sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply rounded-lg px-4 py-2.5 font-medium text-white
+      bg-gradient-to-r from-accent-purple to-accent-magenta
+      hover:opacity-90 transition-opacity cursor-pointer
+      disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply rounded-lg px-4 py-2.5 font-medium text-gray-200
+      bg-midnight-600 border border-midnight-400
+      hover:bg-midnight-500 transition-colors cursor-pointer
+      disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply rounded-lg px-4 py-2.5 font-medium text-white
+      bg-status-red hover:opacity-90 transition-opacity cursor-pointer;
+  }
+
+  .input-field {
+    @apply w-full rounded-lg px-3 py-2.5
+      bg-midnight-900 border border-midnight-400
+      text-gray-200 placeholder-midnight-400
+      focus:border-accent-purple focus:outline-none
+      transition-colors;
+  }
+
+  .card {
+    @apply rounded-lg bg-midnight-600 p-4;
+  }
+
+  .address-display {
+    @apply font-mono text-sm truncate;
+  }
+
+  .status-dot {
+    @apply inline-block w-2 h-2 rounded-full;
+  }
+
+  .status-dot-green {
+    @apply bg-status-green shadow-[0_0_6px_rgba(76,175,80,0.6)];
+  }
+
+  .status-dot-amber {
+    @apply bg-status-amber shadow-[0_0_6px_rgba(240,173,78,0.6)];
+  }
+
+  .status-dot-red {
+    @apply bg-status-red shadow-[0_0_6px_rgba(244,67,54,0.6)];
+  }
+}

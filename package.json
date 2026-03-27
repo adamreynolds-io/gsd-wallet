@@ -1,0 +1,41 @@
+{
+  "name": "gsd-wallet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GSD Wallet — Chrome extension for Midnight",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/dapp-connector-api": "4.0.1",
+    "@midnight-ntwrk/wallet-sdk-facade": "3.0.0",
+    "@midnight-ntwrk/wallet-sdk-hd": "3.0.1",
+    "@scure/bip39": "2.0.1",
+    "assert": "^2.1.0",
+    "buffer": "^6.0.3",
+    "idb": "8.0.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "7.5.0",
+    "rxjs": "7.8.1",
+    "zustand": "5.0.3"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "2.0.0-beta.33",
+    "@types/chrome": "0.0.304",
+    "@types/react": "18.3.18",
+    "@types/react-dom": "18.3.5",
+    "@vitejs/plugin-react": "4.4.1",
+    "autoprefixer": "10.4.21",
+    "postcss": "8.5.3",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.9.3",
+    "vite": "6.3.5",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0"
+  }
+}
