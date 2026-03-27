@@ -1,49 +1,92 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --bg-primary: #000000;
+    --bg-secondary: #0a0a0f;
+    --bg-tertiary: #141414;
+    --text-primary: #ffffff;
+    --text-secondary: #a8a8a8;
+    --accent: #0080ff;
+    --accent-hover: #0066cc;
+    --success: #00d66f;
+    --border: #1a1a1a;
+  }
+
+  html, body, #root {
+    @apply h-full m-0 p-0;
+  }
   body {
-    @apply m-0 p-0 font-sans antialiased;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-      sans-serif;
+    @apply font-sans antialiased;
+    background: var(--bg-primary);
+    color: var(--text-primary);
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply rounded-lg px-4 py-2.5 font-medium text-white
-      bg-gradient-to-r from-accent-purple to-accent-magenta
-      hover:opacity-90 transition-opacity cursor-pointer
+    @apply rounded-lg px-4 py-2 font-semibold text-white cursor-pointer
       disabled:opacity-50 disabled:cursor-not-allowed;
+    background: var(--accent);
+    transition: all 0.2s ease;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
   }
 
   .btn-secondary {
-    @apply rounded-lg px-4 py-2.5 font-medium text-gray-200
-      bg-midnight-600 border border-midnight-400
-      hover:bg-midnight-500 transition-colors cursor-pointer
+    @apply rounded-lg px-4 py-2 font-semibold text-white cursor-pointer
       disabled:opacity-50 disabled:cursor-not-allowed;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    transition: all 0.2s ease;
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--bg-secondary);
+    transform: translateY(-1px);
   }
 
   .btn-danger {
-    @apply rounded-lg px-4 py-2.5 font-medium text-white
-      bg-status-red hover:opacity-90 transition-opacity cursor-pointer;
+    @apply rounded-lg px-4 py-2 font-semibold text-white cursor-pointer;
+    background: #ef4444;
+    transition: all 0.2s ease;
+  }
+  .btn-danger:hover {
+    opacity: 0.9;
   }
 
   .input-field {
-    @apply w-full rounded-lg px-3 py-2.5
-      bg-midnight-900 border border-midnight-400
-      text-gray-200 placeholder-midnight-400
-      focus:border-accent-purple focus:outline-none
-      transition-colors;
+    @apply w-full rounded-lg px-3 py-2;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    transition: border-color 0.2s ease;
+  }
+  .input-field:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(0, 128, 255, 0.1);
+  }
+  .input-field::placeholder {
+    color: #555;
   }
 
   .card {
-    @apply rounded-lg bg-midnight-600 p-4;
+    border-radius: 0.75rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: 1rem;
   }
 
   .address-display {
     @apply font-mono text-sm truncate;
+    color: var(--accent);
   }
 
   .status-dot {
@@ -51,14 +94,32 @@
   }
 
   .status-dot-green {
-    @apply bg-status-green shadow-[0_0_6px_rgba(76,175,80,0.6)];
+    background: var(--success);
+    box-shadow: 0 0 6px rgba(0, 214, 111, 0.6);
   }
 
   .status-dot-amber {
-    @apply bg-status-amber shadow-[0_0_6px_rgba(240,173,78,0.6)];
+    background: #f0ad4e;
+    box-shadow: 0 0 6px rgba(240, 173, 78, 0.6);
   }
 
   .status-dot-red {
-    @apply bg-status-red shadow-[0_0_6px_rgba(244,67,54,0.6)];
+    background: #ef4444;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
   }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
 }

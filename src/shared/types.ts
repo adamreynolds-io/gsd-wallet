@@ -67,6 +67,12 @@ export interface SerializedUtxo {
   registered: boolean;
 }
 
+export interface SyncProgress {
+  applied: number;
+  highest: number;
+  connected: boolean;
+}
+
 export interface SerializedWalletState {
   status: WalletStatus;
   environment: Environment;
@@ -76,17 +82,20 @@ export interface SerializedWalletState {
     balances: Record<string, string>;
     coinCount: number;
     syncPercent: number;
+    progress: SyncProgress;
   };
   unshielded: {
     address: string;
     balances: Record<string, string>;
     utxos: SerializedUtxo[];
     syncPercent: number;
+    progress: SyncProgress;
   };
   dust: {
     address: string;
     balance: string;
     syncPercent: number;
+    progress: SyncProgress;
   };
   overallSyncPercent: number;
   isSynced: boolean;
@@ -121,3 +130,8 @@ export interface TxHistoryEntry {
   type: 'transfer' | 'dustReg' | 'dustDereg' | 'dappTx';
   metadata: Record<string, unknown>;
 }
+
+export type InspectorTarget =
+  | { kind: 'transaction'; hash: string }
+  | { kind: 'block'; height: number }
+  | { kind: 'contract'; address: string };

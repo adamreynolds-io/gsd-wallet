@@ -92,3 +92,42 @@ export function getEnvironmentConfig(
 ): EnvironmentConfig {
   return ENVIRONMENTS[environment];
 }
+
+const EXPLORER_URLS: Partial<Record<Environment, string>> = {
+  mainnet: 'https://explorer.mainnet.midnight.network',
+  'mainnet-vpn': 'https://explorer.mainnet.midnight.network',
+  preprod: 'https://explorer.preprod.midnight.network',
+  preview: 'https://explorer.preview.midnight.network',
+  qanet: 'https://explorer.qanet.midnight.network',
+  dev: 'https://explorer.devnet.midnight.network',
+};
+
+export function getExplorerUrl(
+  environment: Environment,
+): string | null {
+  return EXPLORER_URLS[environment] ?? null;
+}
+
+export function explorerTxUrl(
+  environment: Environment,
+  txHash: string,
+): string | null {
+  const base = getExplorerUrl(environment);
+  return base ? `${base}/transactions/${txHash}` : null;
+}
+
+export function explorerBlockUrl(
+  environment: Environment,
+  blockNumber: number,
+): string | null {
+  const base = getExplorerUrl(environment);
+  return base ? `${base}/blocks/${blockNumber}` : null;
+}
+
+export function explorerContractUrl(
+  environment: Environment,
+  contractAddress: string,
+): string | null {
+  const base = getExplorerUrl(environment);
+  return base ? `${base}/contracts/${contractAddress}` : null;
+}

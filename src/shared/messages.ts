@@ -2,6 +2,7 @@ import type {
   Environment,
   SerializedWalletState,
   TransactionResult,
+  TxHistoryEntry,
 } from './types';
 
 // --- DApp <-> Service Worker (via content script bridge) ---
@@ -40,12 +41,22 @@ export type PopupRequest =
       environment: Environment;
     }
   | { type: 'SWITCH_WALLET'; index: number }
-  | { type: 'SWITCH_ENVIRONMENT'; environment: Environment }
+  | {
+      type: 'SWITCH_ENVIRONMENT';
+      environment: Environment;
+      customUrls?: {
+        nodeWsUrl: string;
+        indexerHttpUrl: string;
+        indexerWsUrl: string;
+        provingServerUrl: string;
+      };
+    }
   | { type: 'GET_WALLETS'; environment: Environment }
   | { type: 'SEND_TRANSFER'; params: TransferRequest }
   | { type: 'DUST_REGISTER'; utxoIds: string[]; receiverAddress?: string }
   | { type: 'DUST_DEREGISTER'; utxoIds: string[] }
   | { type: 'CHECK_HAS_WALLETS' }
+  | { type: 'GET_TX_HISTORY' }
   | { type: 'CLEAR_ALL' };
 
 export type PopupResponse =
@@ -56,6 +67,7 @@ export type PopupResponse =
   | { type: 'DUST_REGISTER_RESULT'; result: TransactionResult }
   | { type: 'DUST_DEREGISTER_RESULT'; result: TransactionResult }
   | { type: 'HAS_WALLETS'; exists: boolean }
+  | { type: 'TX_HISTORY'; entries: TxHistoryEntry[] }
   | { type: 'ERROR'; error: string };
 
 export interface TransferRequest {

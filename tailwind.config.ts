@@ -6,25 +6,26 @@ export default {
     extend: {
       colors: {
         midnight: {
-          900: '#0d0d1a',
-          800: '#16162a',
-          700: '#1a1a2e',
-          600: '#2a2a3e',
-          500: '#3a3a52',
-          400: '#555570',
+          900: '#000000',
+          800: '#0a0a0f',
+          700: '#0a0a0f',
+          600: '#141414',
+          500: '#1a1a1a',
+          400: '#333333',
         },
         accent: {
-          purple: '#667eea',
-          magenta: '#764ba2',
+          purple: '#0080ff',
+          magenta: '#0066cc',
         },
         status: {
-          green: '#4caf50',
+          green: '#00d66f',
           amber: '#f0ad4e',
-          red: '#f44336',
+          red: '#ef4444',
         },
       },
       fontFamily: {
-        mono: ['SF Mono', 'Monaco', 'Menlo', 'monospace'],
+        sans: ['Outfit', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'system-ui', 'sans-serif'],
+        mono: ['Courier New', 'SF Mono', 'Monaco', 'Menlo', 'monospace'],
       },
     },
   },

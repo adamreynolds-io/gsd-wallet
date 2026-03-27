@@ -1,7 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { Header } from '@popup/components/Header';
-import { StatusBar } from '@popup/components/StatusBar';
 import { Unlock } from '@popup/pages/Unlock';
 import { Onboarding } from '@popup/pages/Onboarding';
 import { Dashboard } from '@popup/pages/Dashboard';
@@ -15,13 +14,11 @@ export function App() {
   const status = usePopupStore((s) => s.status);
   const hasVault = usePopupStore((s) => s.hasVault);
 
-  // Detect if running in full tab mode and adjust body dimensions
   useEffect(() => {
-    const isFullTab = window.innerWidth > 800;
-    if (isFullTab) {
+    if (window.innerWidth > 800) {
       document.body.style.width = '100vw';
       document.body.style.height = '100vh';
-      document.body.style.maxWidth = '720px';
+      document.body.style.maxWidth = '960px';
       document.body.style.margin = '0 auto';
     }
   }, []);
@@ -29,7 +26,7 @@ export function App() {
   return (
     <div className="flex flex-col h-full">
       <Header />
-      <main className="flex-1 overflow-hidden flex flex-col">
+      <main className="flex-1 min-h-0 overflow-hidden flex flex-col">
         <Routes>
           <Route
             path="/"
@@ -41,7 +38,6 @@ export function App() {
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
-      <StatusBar />
     </div>
   );
 }

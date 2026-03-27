@@ -82,9 +82,17 @@ export function Header() {
   }
 
   return (
-    <header className="flex items-center justify-between px-4 py-2 bg-midnight-800 border-b border-midnight-500">
+    <header className="flex items-center justify-between px-4 py-2 bg-midnight-800 border-b border-midnight-500 shrink-0">
       <div className="flex items-center gap-2">
-        <h1 className="text-lg font-bold text-white tracking-wide">Midnight GSD</h1>
+        <div className="flex items-center gap-1.5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 0C5.37275 0 0 5.37275 0 12C0 18.6273 5.37275 24 12 24C18.6273 24 24 18.6273 24 12C24 5.37275 18.6273 0 12 0ZM12 21.787C6.60346 21.787 2.21305 17.3965 2.21305 12C2.21305 6.60346 6.60276 2.21235 12 2.21235C17.3972 2.21235 21.787 6.60276 21.787 11.9993C21.787 17.3958 17.3965 21.7863 12 21.7863V21.787Z" fill="white"/>
+            <path d="M13.127 10.874H10.874V13.127H13.127V10.874Z" fill="white"/>
+            <path d="M13.127 7.31738H10.874V9.57031H13.127V7.31738Z" fill="white"/>
+            <path d="M13.127 3.76074H10.874V6.01367H13.127V3.76074Z" fill="white"/>
+          </svg>
+          <h1 className="text-lg font-bold text-white tracking-wide">Midnight GSD</h1>
+        </div>
         {isActive && (
           <select
             className="text-xs bg-midnight-600 text-gray-300 border border-midnight-400 rounded px-1.5 py-0.5 cursor-pointer focus:outline-none focus:border-accent-purple"
@@ -108,6 +116,9 @@ export function Header() {
                   const port = chrome.runtime.connect({ name: 'gsd-popup' });
                   port.postMessage({ type: 'CLEAR_ALL' });
                   port.disconnect();
+                  usePopupStore.getState().setHasVault(false);
+                  usePopupStore.getState().setStatus('uninitialized');
+                  usePopupStore.getState().setWalletState(null as never);
                   navigate('/onboarding');
                 }
               }}
