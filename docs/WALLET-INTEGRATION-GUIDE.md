@@ -400,10 +400,10 @@ function deserializeBigInts(method: string, result: unknown): unknown {
 
 ### Request timeout
 
-Add a timeout on inpage requests to prevent hung promises. Proving-heavy operations (contract calls, transfers) take 15-30+ seconds, so the timeout must be long enough to accommodate proving:
+Add a timeout on inpage requests to prevent hung promises. Proving-heavy operations (contract calls, transfers) take 15-30+ seconds, so the timeout must be long enough to accommodate proving and submission:
 
 ```typescript
-const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes — proving can take 30+ seconds
+const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes — proving + submission can take 30+ seconds
 const timeout = setTimeout(() => {
   window.removeEventListener('message', handleResponse);
   reject(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`));
@@ -411,6 +411,19 @@ const timeout = setTimeout(() => {
 ```
 
 **Reference:** `gsd-wallet/src/content-script/inpage.ts`
+
+### Service worker race condition
+
+When Chrome restarts the service worker, `autoUnlock` reinitializes the wallet. API handlers must wait for this to complete:
+
+```typescript
+// In your API handler, before using the facade:
+await walletManager.waitForReady();
+```
+
+Without this, API calls can hit a dead or partially-initialized facade and hang indefinitely.
+
+**Reference:** `gsd-wallet/src/background/walletManager.ts:waitForReady`, `gsd-wallet/src/background/connectedApiHandler.ts`
 
 ---
 
@@ -535,6 +548,8 @@ A wallet showing NIGHT=0 with contract tokens present is **correct behavior, not
 | UTXO hash "Not found in indexer" | `intentHash` is not a transaction hash | Don't use intent hash as indexer lookup key |
 | Popup scrolls past bottom | Chrome enforces viewport height limit (~600px) | Cap popup height; offer "Open in Full Tab" |
 | Service worker dies mid-operation | Chrome kills idle SWs after ~30s | Use `chrome.alarms` keepalive + persistent ports |
+| API call hangs after SW restart | `autoUnlock` reinitializes facade while API handler uses old ref | Gate API handlers with `waitForReady()` before using facade |
+| `balanceUnboundTransaction` hangs | Facade balance method blocks indefinitely for some contract txs | Under investigation — diagnostics panel helps trace the exact stall point |
 | `HDWallet.fromSeed` returns but wallet fails later | Didn't check `.type === 'seedOk'` | Always check tagged return types |
 | Facade created but never syncs | Forgot to call `facade.start()` after `init()` | `.init()` and `.start()` are separate steps |
 | DApps can't discover wallet | Missing `midnight#ready` event dispatch | Dispatch `CustomEvent('midnight#ready')` after injection |
@@ -575,13 +590,16 @@ The GSD Wallet provides working implementations of every pattern in this guide:
 |---------|------|---------------------|
 | Service worker polyfills | `src/background/index.ts` | Lines 1-38 |
 | Facade initialization | `src/background/walletManager.ts` | `initializeWallet()` |
+| SW race condition guard | `src/background/walletManager.ts` | `waitForReady()` |
 | State serialization | `src/background/walletManager.ts` | `serializeState()` |
-| Sync progress calculation | `src/background/walletManager.ts` | Lines 125-157 |
+| Diagnostic event logger | `src/background/diagnosticLogger.ts` | `emit()`, `getBacklog()`, `onEvent()` |
+| Diagnostic event broadcasting | `src/background/messageRouter.ts` | `onEvent` → `DIAGNOSTIC_EVENT` to ports |
 | Message protocol types | `src/shared/messages.ts` | `PopupRequest`, `PopupResponse` |
-| DApp connector (inpage) | `src/content-script/inpage.ts` | Full file |
+| DApp connector (inpage) | `src/content-script/inpage.ts` | Full file (120s timeout) |
 | Content script bridge | `src/content-script/content-script.ts` | Full file |
-| DApp API handler | `src/background/connectedApiHandler.ts` | `handleApiCall()` |
+| DApp API handler | `src/background/connectedApiHandler.ts` | `handleApiCall()` with structured emit |
 | Explorer GraphQL queries | `src/shared/indexerQuery.ts` | `fetchTxDetail()`, `fetchBlockDetail()`, `fetchContractDetail()` |
+| Diagnostics panel UI | `src/popup/components/DiagnosticsPanel.tsx` | Filters, auto-scroll, expand/collapse |
 | Environment configuration | `src/shared/environments.ts` | `ENVIRONMENTS` map |
 | Async wallet creation | `src/background/messageRouter.ts` | `ADD_WALLET` case |
 | Clear wallet with state guard | `src/popup/hooks/useWalletState.ts` | `hasVault !== false` guard |
