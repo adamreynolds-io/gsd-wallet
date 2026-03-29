@@ -1,4 +1,5 @@
 import type {
+  DiagnosticEvent,
   Environment,
   SerializedWalletState,
   TransactionResult,
@@ -57,6 +58,7 @@ export type PopupRequest =
   | { type: 'DUST_DEREGISTER'; utxoIds: string[] }
   | { type: 'CHECK_HAS_WALLETS' }
   | { type: 'GET_TX_HISTORY' }
+  | { type: 'GET_DIAGNOSTIC_BACKLOG' }
   | { type: 'CLEAR_ALL' };
 
 export type PopupResponse =
@@ -68,6 +70,8 @@ export type PopupResponse =
   | { type: 'DUST_DEREGISTER_RESULT'; result: TransactionResult }
   | { type: 'HAS_WALLETS'; exists: boolean }
   | { type: 'TX_HISTORY'; entries: TxHistoryEntry[] }
+  | { type: 'DIAGNOSTIC_EVENT'; event: DiagnosticEvent }
+  | { type: 'DIAGNOSTIC_EVENTS_BATCH'; events: DiagnosticEvent[] }
   | { type: 'ERROR'; error: string };
 
 export interface TransferRequest {

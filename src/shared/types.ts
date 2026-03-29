@@ -135,3 +135,35 @@ export type InspectorTarget =
   | { kind: 'transaction'; hash: string }
   | { kind: 'block'; height: number }
   | { kind: 'contract'; address: string };
+
+// --- Diagnostics ---
+
+export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export type DiagnosticCategory =
+  | 'sw'
+  | 'wallet'
+  | 'state'
+  | 'dapp'
+  | 'api'
+  | 'popup'
+  | 'tx'
+  | 'indexer'
+  | 'storage'
+  | 'error';
+
+export const DIAGNOSTIC_LEVELS: readonly DiagnosticLevel[] = ['debug', 'info', 'warn', 'error'];
+
+export const DIAGNOSTIC_CATEGORIES: readonly DiagnosticCategory[] = [
+  'sw', 'wallet', 'state', 'dapp', 'api', 'popup', 'tx', 'indexer', 'storage', 'error',
+];
+
+export interface DiagnosticEvent {
+  id: number;
+  timestamp: number;
+  level: DiagnosticLevel;
+  category: DiagnosticCategory;
+  message: string;
+  data?: unknown;
+  elapsed?: number;
+}

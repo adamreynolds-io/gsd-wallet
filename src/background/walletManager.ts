@@ -20,6 +20,7 @@ import type {
 } from '@shared/types';
 import { NIGHT_TOKEN_ID } from '@shared/constants';
 import { getEnvironmentConfig } from '@shared/environments';
+import { emit } from './diagnosticLogger';
 
 export interface WalletSecretKeys {
   shieldedSecretKeys: ledger.ZswapSecretKeys;
@@ -40,9 +41,23 @@ interface ActiveWallet {
 
 let activeWallet: ActiveWallet | null = null;
 let stateListeners: Array<(state: SerializedWalletState) => void> = [];
+let initializingPromise: Promise<void> | null = null;
 
 export function getActiveWallet(): ActiveWallet | null {
   return activeWallet;
+}
+
+/**
+ * Wait for any in-progress wallet initialization to complete.
+ * API handlers must call this before using the facade to avoid
+ * racing with service worker auto-unlock reinitialization.
+ */
+export async function waitForReady(): Promise<void> {
+  if (initializingPromise) {
+    emit('debug', 'wallet', 'waitForReady: blocked on initialization');
+    await initializingPromise;
+    emit('debug', 'wallet', 'waitForReady: initialization complete');
+  }
 }
 
 export function getFacade(): WalletFacade | null {
@@ -198,7 +213,7 @@ function serializeState(
   };
 }
 
-export async function initializeWallet(
+export function initializeWallet(
   seed: Uint8Array,
   environment: Environment,
   accountIndex: number = 0,
@@ -210,15 +225,38 @@ export async function initializeWallet(
     provingServerUrl: string;
   },
 ): Promise<void> {
-  await stopWallet();
+  const doInit = async () => {
+    await stopWallet();
+    await initializeWalletCore(seed, environment, accountIndex, walletName, customUrls);
+  };
+  initializingPromise = doInit().finally(() => { initializingPromise = null; });
+  return initializingPromise;
+}
+
+async function initializeWalletCore(
+  seed: Uint8Array,
+  environment: Environment,
+  accountIndex: number = 0,
+  walletName: string = '',
+  customUrls?: {
+    nodeWsUrl: string;
+    indexerHttpUrl: string;
+    indexerWsUrl: string;
+    provingServerUrl: string;
+  },
+): Promise<void> {
+  const t0 = Date.now();
+  emit('info', 'wallet', `Initializing wallet`, { environment, accountIndex, walletName });
 
   const envConfig = getEnvironmentConfig(environment);
   const effectiveConfig = customUrls
     ? { ...envConfig, ...customUrls }
     : envConfig;
 
+  emit('debug', 'wallet', 'Deriving HD keys');
   const hdWallet = HDWallet.fromSeed(seed);
   if (hdWallet.type !== 'seedOk') {
+    emit('error', 'wallet', 'HDWallet.fromSeed failed', { type: hdWallet.type });
     throw new Error('Failed to initialize HDWallet from seed');
   }
 
@@ -228,10 +266,12 @@ export async function initializeWallet(
     .deriveKeysAt(0);
 
   if (derivationResult.type !== 'keysDerived') {
+    emit('error', 'wallet', 'Key derivation failed', { type: derivationResult.type });
     throw new Error('Failed to derive keys from HD wallet');
   }
 
   hdWallet.hdWallet.clear();
+  emit('debug', 'wallet', 'Keys derived, creating secret keys');
 
   const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(
     derivationResult.keys[Roles.Zswap],
@@ -256,6 +296,8 @@ export async function initializeWallet(
     txHistoryStorage: new InMemoryTransactionHistoryStorage(),
   };
 
+  emit('info', 'wallet', 'Creating WalletFacade', { networkId: effectiveConfig.networkId, indexer: effectiveConfig.indexerHttpUrl, node: effectiveConfig.nodeWsUrl, prover: effectiveConfig.provingServerUrl });
+  const facadeT0 = Date.now();
   const facade = await WalletFacade.init({
     configuration: config,
     shielded: (cfg) =>
@@ -273,9 +315,14 @@ export async function initializeWallet(
       ),
     provingService: () => makeServerProvingService({ provingServerUrl: new URL(effectiveConfig.provingServerUrl) }),
   });
+  emit('info', 'wallet', 'WalletFacade.init complete', undefined, Date.now() - facadeT0);
 
+  emit('info', 'wallet', 'Starting facade (connecting to indexer/node)');
+  const startT0 = Date.now();
   await facade.start(shieldedSecretKeys, dustSecretKey);
+  emit('info', 'wallet', 'facade.start complete', undefined, Date.now() - startT0);
 
+  let lastStatus = '';
   const sub = facade.state().subscribe((facadeState) => {
     if (activeWallet) {
       activeWallet.latestState = facadeState;
@@ -285,6 +332,18 @@ export async function initializeWallet(
       environment,
       accountIndex,
     );
+
+    // Emit on status transitions only
+    if (serialized.status !== lastStatus) {
+      emit('info', 'state', `Status: ${lastStatus || '(none)'} -> ${serialized.status}`, {
+        shielded: serialized.shielded.progress,
+        unshielded: serialized.unshielded.progress,
+        dust: serialized.dust.progress,
+        syncPercent: serialized.overallSyncPercent,
+      });
+      lastStatus = serialized.status;
+    }
+
     chrome.storage.session.set({ gsdLastState: serialized });
     for (const listener of stateListeners) {
       listener(serialized);
@@ -304,20 +363,21 @@ export async function initializeWallet(
   };
 
   chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.4 });
+  emit('info', 'wallet', 'Wallet initialized', { environment, networkId: effectiveConfig.networkId }, Date.now() - t0);
 }
 
 export async function stopWallet(): Promise<void> {
   if (activeWallet) {
-    console.log('[GSD] Stopping wallet...');
+    emit('info', 'wallet', 'Stopping wallet');
     activeWallet.subscription.unsubscribe();
     try {
       await activeWallet.facade.stop();
     } catch (e) {
-      console.warn('[GSD] Facade stop error (ignored):', e);
+      emit('warn', 'wallet', 'Facade stop error (ignored)', { error: String(e) });
     }
     activeWallet = null;
     chrome.alarms.clear('gsd-keepalive');
-    console.log('[GSD] Wallet stopped');
+    emit('info', 'wallet', 'Wallet stopped');
   }
 }
 

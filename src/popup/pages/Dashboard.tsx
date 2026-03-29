@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { TransferModal } from '@popup/components/TransferModal';
 import { DustModal } from '@popup/components/DustModal';
 import { Inspector } from '@popup/components/Inspector';
+import { DiagnosticsPanel } from '@popup/components/DiagnosticsPanel';
 import { usePopupStore } from '@popup/store/popupStore';
 import {
   NIGHT_TOKEN_ID,
@@ -35,6 +36,8 @@ export function Dashboard() {
     useState<InspectorTarget | null>(null);
   const [inspectorHistory, setInspectorHistory] =
     useState<InspectorTarget[]>([]);
+  const [inspectorForward, setInspectorForward] =
+    useState<InspectorTarget[]>([]);
   const [inspectorData, setInspectorData] = useState<unknown>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -52,6 +55,7 @@ export function Dashboard() {
     }
     setInspectorTarget(target);
     setSearchQuery(targetToQuery(target));
+    setInspectorForward([]);
   }
 
   function inspectHash(hash: string) {
@@ -61,15 +65,31 @@ export function Dashboard() {
   function inspectorBack() {
     const prev = inspectorHistory[inspectorHistory.length - 1];
     if (prev) {
+      if (inspectorTarget) {
+        setInspectorForward((f) => [inspectorTarget, ...f]);
+      }
       setInspectorHistory((h) => h.slice(0, -1));
       setInspectorTarget(prev);
       setSearchQuery(targetToQuery(prev));
     }
   }
 
+  function inspectorFwd() {
+    const next = inspectorForward[0];
+    if (next) {
+      if (inspectorTarget) {
+        setInspectorHistory((h) => [...h, inspectorTarget]);
+      }
+      setInspectorForward((f) => f.slice(1));
+      setInspectorTarget(next);
+      setSearchQuery(targetToQuery(next));
+    }
+  }
+
   function inspectorClose() {
     setInspectorTarget(null);
     setInspectorHistory([]);
+    setInspectorForward([]);
     setInspectorData(null);
     setSearchQuery('');
   }
@@ -204,58 +224,75 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* ── Bottom: Explorer panel (always visible) ── */}
-      <div className={`bg-midnight-900 border-t border-midnight-500 flex flex-col ${isFullTab ? 'flex-1 min-h-[150px]' : 'h-[280px] shrink-0'}`}>
-        <div className="flex items-center gap-2 px-3 pt-1.5 pb-1 shrink-0">
-          <span className="text-xs uppercase tracking-wider text-gray-500">Explorer</span>
-          <ExplorerSearch
-            value={searchQuery}
-            onChange={setSearchQuery}
-            onSearch={(target) => {
-              setInspectorHistory([]);
-              setInspectorData(null);
-              setInspectorTarget(target);
-              setSearchQuery(targetToQuery(target));
-            }}
-          />
-          {inspectorHistory.length > 0 && (
-            <button
-              onClick={inspectorBack}
-              className="text-xs px-1.5 py-0.5 rounded bg-midnight-800 text-gray-400 hover:text-gray-200"
-            >
-              Back
-            </button>
-          )}
-          {inspectorTarget != null && (
-            <button
-              onClick={inspectorClose}
-              className="text-xs px-1.5 py-0.5 rounded bg-midnight-800 text-gray-400 hover:text-gray-200"
-            >
-              Clear
-            </button>
-          )}
-          <div className="flex-1" />
-          {inspectorData != null && (
-            <CopyBtn getData={() => JSON.stringify(inspectorData, null, 2)} />
-          )}
+      {/* ── Bottom: Explorer + Diagnostics ── */}
+      <div className={`border-t border-midnight-500 flex ${isFullTab ? 'flex-1 min-h-[150px]' : 'h-[280px] shrink-0'}`}>
+        {/* Explorer panel */}
+        <div className={`bg-midnight-900 flex flex-col ${isFullTab ? 'flex-1 min-w-0' : 'flex-1'}`}>
+          <div className="px-3 pt-1.5 shrink-0 space-y-1">
+            <div className="flex items-center gap-1">
+              <span className="text-xs uppercase tracking-wider text-gray-500">Explorer</span>
+              <div className="flex-1" />
+              <button
+                onClick={inspectorBack}
+                disabled={inspectorHistory.length === 0}
+                className={`text-xs px-1.5 py-0.5 rounded bg-midnight-800 ${inspectorHistory.length > 0 ? 'text-gray-400 hover:text-gray-200' : 'text-gray-700 cursor-default'}`}
+                title="Back"
+              >
+                &#8592;
+              </button>
+              <button
+                onClick={inspectorFwd}
+                disabled={inspectorForward.length === 0}
+                className={`text-xs px-1.5 py-0.5 rounded bg-midnight-800 ${inspectorForward.length > 0 ? 'text-gray-400 hover:text-gray-200' : 'text-gray-700 cursor-default'}`}
+                title="Forward"
+              >
+                &#8594;
+              </button>
+              <button
+                onClick={inspectorClose}
+                disabled={inspectorTarget == null}
+                className={`p-0.5 rounded ${inspectorTarget != null ? 'text-gray-500 hover:text-gray-200 hover:bg-midnight-800' : 'text-gray-700 cursor-default'}`}
+                title="Clear explorer"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+              <CopyBtn getData={() => inspectorData ? JSON.stringify(inspectorData, null, 2) : ''} disabled={inspectorData == null} />
+            </div>
+            <ExplorerSearch
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onSearch={(target) => {
+                setInspectorHistory([]);
+                setInspectorForward([]);
+                setInspectorData(null);
+                setInspectorTarget(target);
+                setSearchQuery(targetToQuery(target));
+              }}
+            />
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-2">
+            {inspectorTarget ? (
+              <Inspector
+                key={targetToQuery(inspectorTarget)}
+                target={inspectorTarget}
+                environment={walletState.environment}
+                onInspect={inspect}
+                onClose={inspectorClose}
+                onBack={inspectorHistory.length > 0 ? inspectorBack : undefined}
+                onDataLoaded={setInspectorData}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-600 text-sm">
+                Click a transaction hash, UTXO, or address to inspect
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-2">
-          {inspectorTarget ? (
-            <Inspector
-              key={targetToQuery(inspectorTarget)}
-              target={inspectorTarget}
-              environment={walletState.environment}
-              onInspect={inspect}
-              onClose={inspectorClose}
-              onBack={inspectorHistory.length > 0 ? inspectorBack : undefined}
-              onDataLoaded={setInspectorData}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full text-gray-600 text-sm">
-              Click a transaction hash, UTXO, or address to inspect
-            </div>
-          )}
+        {/* Diagnostics panel */}
+        <div className="flex-1 min-w-0 border-l border-midnight-500">
+          <DiagnosticsPanel />
         </div>
       </div>
 
@@ -482,15 +519,20 @@ const TX_STATUS_COLORS: Record<string, string> = {
   pending: 'text-amber-400', confirmed: 'text-green-400', finalized: 'text-green-300', discarded: 'text-red-400',
 };
 
-function CopyBtn({ getData }: { getData: () => string }) {
+function CopyBtn({ getData, disabled }: { getData: () => string; disabled?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
-      onClick={() => { navigator.clipboard.writeText(getData()); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-      className="text-xs px-1.5 py-0.5 rounded bg-midnight-800 text-gray-500 hover:text-gray-200"
-      title="Copy as JSON"
+      onClick={() => { if (!disabled) { navigator.clipboard.writeText(getData()); setCopied(true); setTimeout(() => setCopied(false), 1500); } }}
+      disabled={disabled}
+      className={`p-0.5 rounded ${disabled ? 'text-gray-700 cursor-default' : 'text-gray-500 hover:text-gray-200 hover:bg-midnight-800'}`}
+      title="Copy current view as JSON to clipboard"
     >
-      {copied ? 'Copied!' : 'Copy (JSON)'}
+      {copied ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4caf50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+      )}
     </button>
   );
 }
@@ -565,11 +607,12 @@ function ExplorerSearch({ value, onChange, onSearch }: {
         placeholder="tx hash, block height, or contract"
         spellCheck={false}
         autoComplete="off"
-        className="text-xs bg-midnight-900 border border-midnight-600 rounded px-2 py-0.5 text-gray-300 placeholder-gray-600 w-[260px] focus:border-accent-purple focus:outline-none"
+        className="text-xs bg-midnight-900 border border-midnight-600 rounded px-2 py-1 text-gray-300 placeholder-gray-600 flex-1 min-w-0 focus:border-accent-purple focus:outline-none"
       />
       <button
         type="submit"
-        className="text-xs px-2 py-0.5 rounded bg-midnight-800 text-gray-400 hover:text-gray-200"
+        className="text-xs px-2 py-1 rounded bg-midnight-800 text-gray-400 hover:text-gray-200"
+        title="Search"
       >
         Go
       </button>
