@@ -1,6 +1,6 @@
 # Midnight GSD Wallet
 
-Developer/QA wallet Chrome extension for the [Midnight](https://midnight.network) blockchain. Built for testing, debugging, and dApp development — not for production use.
+Developer/QA wallet Chrome extension for the [Midnight](https://midnight.network) blockchain. **Get Stuff Debugged** — built for testing, debugging, and dApp development, not for production use.
 
 ## Features
 
@@ -11,8 +11,17 @@ Developer/QA wallet Chrome extension for the [Midnight](https://midnight.network
 - **Dust operations** — register/deregister UTXOs for dust generation
 - **DApp connector** — implements `@midnight-ntwrk/dapp-connector-api` v4.0.1 with `window.midnight` injection
 - **Debug panel** — real-time sync progress, coin counts, UTXO inspection, token balances per subsystem (Dust/Shielded/Unshielded)
-- **Built-in explorer** — query the v4 indexer directly for transaction, block, and contract details without leaving the wallet
+- **Built-in explorer** — query the v4 indexer for transaction, block, and contract details with forward/back navigation
+- **Real-time diagnostics panel** — structured event stream from the service worker with:
+  - Log levels (debug/info/warn/error) and categories (sw/wallet/state/dapp/api/popup/tx/indexer/storage/error)
+  - Checkbox filters for granular control — retroactive filtering hides/shows historical events
+  - All/None toggle, per-event expand/collapse (+/−), global expand/collapse all
+  - Auto-scroll with jump-to-bottom button when scrolled up
+  - Per-event copy and copy-all (respects active filters) as JSON
+  - Every wallet lifecycle event, facade init/start/stop, state transitions, dApp API calls, and transaction phases with elapsed times
 - **Transaction history** — records transfers and dust operations with clickable tx hashes
+- **Service worker race protection** — API handlers wait for initialization to complete before using the facade
+- **120-second request timeout** — long enough for proving-heavy operations
 - **Midnight style guide** — official color palette, Outfit font, Midnight logo
 
 ## Quick start
@@ -33,15 +42,17 @@ npm run build
 
 ## Usage
 
-**Popup mode** — click the extension icon for a compact 780x600 view.
+**Popup mode** — click the extension icon for a compact view with wallet info, debug tabs, explorer, and diagnostics side by side.
 
-**Full tab mode** — click the expand icon in the header for a larger view with more explorer space.
+**Full tab mode** — click the expand icon in the header for a larger view. Bottom half splits into Explorer (left) and Diagnostics (right).
 
 **Localnet** — select "Undeployed" environment and use the W0-W3 buttons to quick-import prefunded genesis wallets.
 
 **Mainnet VPN** — select "Mainnet (VPN)" to connect via `td-rpc.mainnet.midnight.network`. Requires VPN access.
 
-**Explorer** — type a transaction hash, block height, or contract address in the search field. The wallet auto-detects the type: numbers are block lookups, 64-char hex strings try transaction first then fall back to contract.
+**Explorer** — type a transaction hash, block height, or contract address in the search field. Numbers are block lookups, hex strings try transaction first then fall back to contract. Use ← → buttons for navigation history.
+
+**Diagnostics** — the events panel streams all wallet operations in real time. Use the checkbox filters to show/hide specific log levels or event categories. Expand events with the + button to see full payloads. Copy individual events or all visible events as JSON.
 
 **Custom endpoints** — Settings page allows overriding Node, Indexer, and Prover URLs per environment.
 
@@ -53,30 +64,32 @@ src/
     index.ts            SW entry, polyfills, keepalive
     walletManager.ts    WalletFacade init, state serialization, key management
     stateManager.ts     Vault persistence, wallet switching, session management
-    messageRouter.ts    Popup + dApp message dispatch, tx history recording
+    messageRouter.ts    Popup + dApp message dispatch, diagnostic broadcasting
     connectedApiHandler.ts  DApp connector API implementation (18 methods)
+    diagnosticLogger.ts Ring buffer event logger with structured levels/categories
   popup/                React UI
     App.tsx             Router, layout shell
     pages/
-      Dashboard.tsx     Main view (wallet + debug + explorer)
+      Dashboard.tsx     Main view (wallet + debug + explorer + diagnostics)
       Onboarding.tsx    Wallet creation/import flow
       Settings.tsx      Network configuration
       Unlock.tsx        Auto-unlock
     components/
       Header.tsx        Logo, network selector, wallet switcher
       Inspector.tsx     Explorer detail views (tx/block/contract)
+      DiagnosticsPanel.tsx Real-time event stream with filters
       Modal.tsx         Generic modal
       TransferModal.tsx Transfer flow (7 steps)
       DustModal.tsx     Dust registration/deregistration
       AddressDisplay.tsx Address with copy
       StepIndicator.tsx Step progress bar
     store/
-      popupStore.ts     Zustand state
+      popupStore.ts     Zustand state (wallet + diagnostics)
     hooks/
-      useWalletState.ts Service worker connection
+      useWalletState.ts Service worker connection + diagnostic backlog
   content-script/       DApp bridge
     content-script.ts   Persistent port bridge (content world)
-    inpage.ts           window.midnight API (main world)
+    inpage.ts           window.midnight API (main world, 120s timeout)
     inpage.js           Plain JS copy for injection
   core/                 Business logic
     transfer.ts         Shielded/unshielded transfer execution
@@ -86,8 +99,8 @@ src/
     balanceUtils.ts     Balance formatting
     wallet.ts           Key derivation utilities
   shared/               Cross-layer types and utilities
-    types.ts            TypeScript interfaces
-    messages.ts         Message protocol (popup + dApp)
+    types.ts            TypeScript interfaces (wallet state + diagnostic events)
+    messages.ts         Message protocol (popup + dApp + diagnostics)
     environments.ts     Network configs, explorer URLs
     indexerQuery.ts     GraphQL queries (v4 indexer)
     storage.ts          IndexedDB wrapper
@@ -110,9 +123,28 @@ The wallet injects `window.midnight[uuid]` on all pages with:
 }
 ```
 
-Dispatches `midnight#ready` event for dApp discovery. 30-second request timeout on all API calls.
+Dispatches `midnight#ready` event for dApp discovery. 120-second request timeout on all API calls.
 
 **Connected API methods:** `getShieldedBalances`, `getUnshieldedBalances`, `getDustBalance`, `getShieldedAddresses`, `getUnshieldedAddress`, `getDustAddress`, `getConfiguration`, `getConnectionStatus`, `makeTransfer`, `balanceUnsealedTransaction`, `balanceSealedTransaction`, `submitTransaction`, `signData`, `getTxHistory`, `hintUsage`.
+
+## Diagnostics
+
+The diagnostics panel streams structured events from the service worker in real time. Events are categorized by level and source:
+
+| Category | What it captures |
+|---|---|
+| `sw` | Service worker lifecycle (start, install, update) |
+| `wallet` | Wallet init, HD key derivation, facade start/stop |
+| `state` | Sync status transitions (initializing → syncing → synced) |
+| `dapp` | DApp connect/disconnect, session management |
+| `api` | Every DApp API call with method name, elapsed time |
+| `popup` | Popup message handling |
+| `tx` | Transaction phases: deserialize → balance → sign → prove → submit |
+| `indexer` | GraphQL queries to the indexer |
+| `storage` | IndexedDB operations |
+| `error` | Errors at any layer |
+
+Events include elapsed time for async operations, raw payloads in expandable details, and segment IDs for transaction inspection.
 
 ## Explorer queries
 
@@ -123,7 +155,7 @@ The built-in explorer queries the v4 indexer GraphQL API directly:
 | Number (e.g. `121972`) | Block by height |
 | 64-char hex | Transaction by hash, falls back to contract by address |
 
-Results show status, block info, fees, contract actions, created/spent UTXOs with clickable sub-navigation.
+Results show status, block info, fees, contract actions, created/spent UTXOs with clickable sub-navigation. Forward/back buttons for navigation history.
 
 ## Security considerations
 
@@ -153,6 +185,12 @@ The UI displays a warning banner: **"Dev wallet — seeds unencrypted"**.
 | Undeployed | `localhost:9944` | `localhost:8088/api/v4` | — |
 
 Proof server: `localhost:6300` (all environments).
+
+## Known limitations
+
+- **TX hash mismatch** — `facade.submitTransaction()` returns the SDK's internal identifier (00-prefixed, 66 hex chars) which differs from the indexer's transaction hash (64 hex chars). Diagnostic event tx hashes cannot be used for explorer lookups.
+- **Contract address not visible** — deploy transactions don't expose the contract address in the wallet; the DApp computes it client-side before submission.
+- **`balanceUnboundTransaction` hang** — the facade's balance method can hang indefinitely for certain contract call transactions (e.g., `mintAndReceive`). Under active investigation.
 
 ## Dependencies
 
