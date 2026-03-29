@@ -1,201 +1,104 @@
 # Midnight GSD Wallet
 
-Developer/QA wallet Chrome extension for the [Midnight](https://midnight.network) blockchain. **Get Stuff Debugged** — built for testing, debugging, and dApp development, not for production use.
+Chrome extension wallet for dApp developers building on the [Midnight](https://midnight.network) blockchain. Designed for testing and debugging on Undeployed (local), DevNet, QANet, Preview, PreProd, and Mainnet environments.
+
+**This is not a production wallet.** Seeds are stored unencrypted. Use it to develop and test your dApps, not to hold real funds.
+
+## Who is this for?
+
+- **dApp developers** testing contract deployments, token transfers, and DApp connector integration
+- **QA engineers** verifying wallet behavior across Midnight environments
+- **SDK integrators** building their own Midnight wallet (see [Integration Guide](docs/WALLET-INTEGRATION-GUIDE.md))
 
 ## Features
 
-- **Wallet management** — generate (24-word mnemonic) or import (seed phrase, hex seed) wallets
-- **Multi-environment** — Mainnet, Mainnet VPN, PreProd, Preview, QANet, DevNet, Undeployed (local)
+- **Multi-environment** — Undeployed (localhost), DevNet, QANet, Preview, PreProd, Mainnet, Mainnet VPN
+- **Quick-start on localnet** — one-click import of 4 prefunded genesis wallets (W0-W3)
+- **Wallet management** — generate 24-word mnemonic or import seed phrase / hex seed
 - **Multi-wallet** — multiple wallets per environment with quick-switch
 - **Shielded & unshielded transfers** — send tokens with ZK proving via server prover
 - **Dust operations** — register/deregister UTXOs for dust generation
-- **DApp connector** — implements `@midnight-ntwrk/dapp-connector-api` v4.0.1 with `window.midnight` injection
-- **Debug panel** — real-time sync progress, coin counts, UTXO inspection, token balances per subsystem (Dust/Shielded/Unshielded)
-- **Built-in explorer** — query the v4 indexer for transaction, block, and contract details with forward/back navigation
-- **Real-time diagnostics panel** — structured event stream from the service worker with:
-  - Log levels (debug/info/warn/error) and categories (sw/wallet/state/dapp/api/popup/tx/indexer/storage/error)
-  - Checkbox filters for granular control — retroactive filtering hides/shows historical events
-  - All/None toggle, per-event expand/collapse (+/−), global expand/collapse all
-  - Auto-scroll with jump-to-bottom button when scrolled up
-  - Per-event copy and copy-all (respects active filters) as JSON
-  - Every wallet lifecycle event, facade init/start/stop, state transitions, dApp API calls, and transaction phases with elapsed times
-- **Transaction history** — records transfers and dust operations with clickable tx hashes
-- **Service worker race protection** — API handlers wait for initialization to complete before using the facade
-- **120-second request timeout** — long enough for proving-heavy operations
-- **Midnight style guide** — official color palette, Outfit font, Midnight logo
+- **DApp connector** — `window.midnight` injection implementing the Midnight DApp connector API
+- **Debug panel** — real-time sync progress, UTXO inspection, token balances per subsystem (Dust/Shielded/Unshielded)
+- **Built-in explorer** — query the v4 indexer for transaction, block, and contract details
+- **Diagnostics** — structured event stream from the service worker with filterable log levels
+- **Custom endpoints** — override Node, Indexer, and Prover URLs per environment
 
 ## Quick start
 
 ```bash
-# Install dependencies
 npm install
-
-# Build the extension
 npm run build
-
-# Load in Chrome
-# 1. Go to chrome://extensions
-# 2. Enable Developer mode
-# 3. Click "Load unpacked"
-# 4. Select the dist/ directory
 ```
 
-## Usage
+Load in Chrome: `chrome://extensions` → Developer mode → Load unpacked → select `dist/`
 
-**Popup mode** — click the extension icon for a compact view with wallet info, debug tabs, explorer, and diagnostics side by side.
+**Recommended:** Click the expand icon (↗) in the header to open in a full browser tab. The popup works but the full-tab view gives you much more space for the debug panel, explorer, and diagnostics.
 
-**Full tab mode** — click the expand icon in the header for a larger view. Bottom half splits into Explorer (left) and Diagnostics (right).
+### Localnet setup
 
-**Localnet** — select "Undeployed" environment and use the W0-W3 buttons to quick-import prefunded genesis wallets.
+1. Start local infrastructure (node + indexer + proof server)
+2. Select "Undeployed" environment in the wallet
+3. Click W0 to import the genesis wallet with all minted NIGHT
+4. Deploy and test your contracts
 
-**Mainnet VPN** — select "Mainnet (VPN)" to connect via `td-rpc.mainnet.midnight.network`. Requires VPN access.
+### Testnet setup
 
-**Explorer** — type a transaction hash, block height, or contract address in the search field. Numbers are block lookups, hex strings try transaction first then fall back to contract. Use ← → buttons for navigation history.
+1. Start a proof server: `docker run -d -p 6300:6300 ghcr.io/midnight-ntwrk/proof-server:8.0.2 midnight-proof-server -v`
+2. Select your target network (DevNet, QANet, Preview, PreProd)
+3. Import your funded wallet seed
+4. Your dApp can discover the wallet via `window.midnight`
 
-**Diagnostics** — the events panel streams all wallet operations in real time. Use the checkbox filters to show/hide specific log levels or event categories. Expand events with the + button to see full payloads. Copy individual events or all visible events as JSON.
+## DApp connector
 
-**Custom endpoints** — Settings page allows overriding Node, Indexer, and Prover URLs per environment.
+The wallet injects `window.midnight[uuid]` on all pages and dispatches `midnight#ready` for discovery.
 
-## Architecture
+**17 API methods:** `getShieldedBalances`, `getUnshieldedBalances`, `getDustBalance`, `getShieldedAddresses`, `getUnshieldedAddress`, `getDustAddress`, `getConfiguration`, `getConnectionStatus`, `makeTransfer`, `balanceUnsealedTransaction`, `balanceSealedTransaction`, `submitTransaction`, `signData`, `getTxHistory`, `hintUsage`, `getProvingProvider`, `makeIntent`.
 
-```
-src/
-  background/           Service worker (wallet lifecycle, message routing)
-    index.ts            SW entry, polyfills, keepalive
-    walletManager.ts    WalletFacade init, state serialization, key management
-    stateManager.ts     Vault persistence, wallet switching, session management
-    messageRouter.ts    Popup + dApp message dispatch, diagnostic broadcasting
-    connectedApiHandler.ts  DApp connector API implementation (18 methods)
-    diagnosticLogger.ts Ring buffer event logger with structured levels/categories
-  popup/                React UI
-    App.tsx             Router, layout shell
-    pages/
-      Dashboard.tsx     Main view (wallet + debug + explorer + diagnostics)
-      Onboarding.tsx    Wallet creation/import flow
-      Settings.tsx      Network configuration
-      Unlock.tsx        Auto-unlock
-    components/
-      Header.tsx        Logo, network selector, wallet switcher
-      Inspector.tsx     Explorer detail views (tx/block/contract)
-      DiagnosticsPanel.tsx Real-time event stream with filters
-      Modal.tsx         Generic modal
-      TransferModal.tsx Transfer flow (7 steps)
-      DustModal.tsx     Dust registration/deregistration
-      AddressDisplay.tsx Address with copy
-      StepIndicator.tsx Step progress bar
-    store/
-      popupStore.ts     Zustand state (wallet + diagnostics)
-    hooks/
-      useWalletState.ts Service worker connection + diagnostic backlog
-  content-script/       DApp bridge
-    content-script.ts   Persistent port bridge (content world)
-    inpage.ts           window.midnight API (main world, 120s timeout)
-    inpage.js           Plain JS copy for injection
-  core/                 Business logic
-    transfer.ts         Shielded/unshielded transfer execution
-    dustRegistration.ts Dust registration
-    dustDeregistration.ts Dust deregistration
-    addressValidation.ts Address parsing
-    balanceUtils.ts     Balance formatting
-    wallet.ts           Key derivation utilities
-  shared/               Cross-layer types and utilities
-    types.ts            TypeScript interfaces (wallet state + diagnostic events)
-    messages.ts         Message protocol (popup + dApp + diagnostics)
-    environments.ts     Network configs, explorer URLs
-    indexerQuery.ts     GraphQL queries (v4 indexer)
-    storage.ts          IndexedDB wrapper
-    constants.ts        Token IDs, denominations
-    errors.ts           Error types
-    crypto.ts           PBKDF2 + AES-256-GCM (unused, for future encryption)
-  offscreen/            Reserved for Phase 3 WASM prover
-```
+`getTxHistory` returns `[]` (stub). `getProvingProvider` and `makeIntent` return errors — use `getConfiguration()` for prover URL.
 
-## DApp connector API
+## Explorer
 
-The wallet injects `window.midnight[uuid]` on all pages with:
+Type a transaction hash, block height, or contract address in the search field:
 
-```typescript
-{
-  rdns: 'io.shielded.gsd',
-  name: 'Midnight GSD Wallet',
-  apiVersion: '4.0.1',
-  connect(networkId: string): Promise<ConnectedAPI>
-}
-```
-
-Dispatches `midnight#ready` event for dApp discovery. 120-second request timeout on all API calls.
-
-**Connected API methods:** `getShieldedBalances`, `getUnshieldedBalances`, `getDustBalance`, `getShieldedAddresses`, `getUnshieldedAddress`, `getDustAddress`, `getConfiguration`, `getConnectionStatus`, `makeTransfer`, `balanceUnsealedTransaction`, `balanceSealedTransaction`, `submitTransaction`, `signData`, `getTxHistory`, `hintUsage`.
-
-## Diagnostics
-
-The diagnostics panel streams structured events from the service worker in real time. Events are categorized by level and source:
-
-| Category | What it captures |
-|---|---|
-| `sw` | Service worker lifecycle (start, install, update) |
-| `wallet` | Wallet init, HD key derivation, facade start/stop |
-| `state` | Sync status transitions (initializing → syncing → synced) |
-| `dapp` | DApp connect/disconnect, session management |
-| `api` | Every DApp API call with method name, elapsed time |
-| `popup` | Popup message handling |
-| `tx` | Transaction phases: deserialize → balance → sign → prove → submit |
-| `indexer` | GraphQL queries to the indexer |
-| `storage` | IndexedDB operations |
-| `error` | Errors at any layer |
-
-Events include elapsed time for async operations, raw payloads in expandable details, and segment IDs for transaction inspection.
-
-## Explorer queries
-
-The built-in explorer queries the v4 indexer GraphQL API directly:
-
-| Search input | Lookup |
-|---|---|
+| Input | Lookup |
+|-------|--------|
 | Number (e.g. `121972`) | Block by height |
-| 64-char hex | Transaction by hash, falls back to contract by address |
-
-Results show status, block info, fees, contract actions, created/spent UTXOs with clickable sub-navigation. Forward/back buttons for navigation history.
-
-## Security considerations
-
-This is a **developer wallet** with intentional trade-offs for convenience:
-
-| Area | Status | Notes |
-|---|---|---|
-| Seed storage | Plaintext in IndexedDB | Crypto module exists but is not wired up. Do not use for real funds. |
-| Password protection | Disabled | Infrastructure exists (`VaultData`, PBKDF2) but bypassed for fast dev access |
-| DApp connections | Auto-approve | No origin validation or user confirmation prompts |
-| Content script | Basic filtering | Checks `event.source` but no protocol blocking |
-| CSP | `wasm-unsafe-eval` | Required for Midnight SDK WASM modules |
-| Key wiping | Not implemented | Keys stay in memory until wallet is locked or SW terminates |
-
-The UI displays a warning banner: **"Dev wallet — seeds unencrypted"**.
+| 64-char hex | Transaction by hash → falls back to contract |
 
 ## Network configuration
 
-| Environment | Node RPC | Indexer | Explorer |
-|---|---|---|---|
-| Mainnet | `rpc.mainnet.midnight.network` | `indexer.mainnet.midnight.network/api/v4` | `explorer.mainnet.midnight.network` |
-| Mainnet VPN | `td-rpc.mainnet.midnight.network` | Same as mainnet | Same as mainnet |
-| PreProd | `rpc.preprod.midnight.network` | `indexer.preprod.midnight.network/api/v4` | `explorer.preprod.midnight.network` |
-| Preview | `rpc.preview.midnight.network` | `indexer.preview.midnight.network/api/v4` | `explorer.preview.midnight.network` |
-| QANet | `rpc.qanet.midnight.network` | `indexer.qanet.midnight.network/api/v4` | `explorer.qanet.midnight.network` |
-| DevNet | `rpc.devnet.midnight.network` | `indexer.devnet.midnight.network/api/v4` | `explorer.devnet.midnight.network` |
-| Undeployed | `localhost:9944` | `localhost:8088/api/v4` | — |
+| Environment | Node RPC | Indexer |
+|---|---|---|
+| Undeployed | `localhost:9944` | `localhost:8088/api/v4/graphql` |
+| DevNet | `rpc.devnet.midnight.network` | `indexer.devnet.midnight.network/api/v4/graphql` |
+| QANet | `rpc.qanet.midnight.network` | `indexer.qanet.midnight.network/api/v4/graphql` |
+| Preview | `rpc.preview.midnight.network` | `indexer.preview.midnight.network/api/v4/graphql` |
+| PreProd | `rpc.preprod.midnight.network` | `indexer.preprod.midnight.network/api/v4/graphql` |
+| Mainnet | `rpc.mainnet.midnight.network` | `indexer.mainnet.midnight.network/api/v4/graphql` |
+| Mainnet VPN | `td-rpc.mainnet.midnight.network` | Same as mainnet |
 
-Proof server: `localhost:6300` (all environments).
+Proof server: `localhost:6300` for all environments.
+
+## Security
+
+Intentional trade-offs for developer convenience:
+
+| Area | Status |
+|---|---|
+| Seed storage | Plaintext in IndexedDB — do not use for real funds |
+| Password protection | Disabled |
+| DApp connections | Auto-approved, no user confirmation |
+| CSP | `wasm-unsafe-eval` required for Midnight SDK WASM |
 
 ## Known issues
 
-- **Segment ID collision in DApp transaction balancing** — [#10](https://github.com/adamreynolds-io/gsd-wallet/issues/10). `balanceUnsealedTransaction` can fail with `IntentSegmentIdCollision`. Works in Lace and the test harness, so likely an integration issue. No workaround — needs proper investigation.
+- **Segment ID collision in DApp transaction balancing** — [#10](https://github.com/adamreynolds-io/gsd-wallet/issues/10)
 
-## Dependencies
+## Documentation
 
-- **Midnight SDK**: `wallet-sdk-facade`, `wallet-sdk-hd`, `wallet-sdk-shielded`, `wallet-sdk-unshielded-wallet`, `wallet-sdk-dust-wallet`, `wallet-sdk-capabilities`, `wallet-sdk-address-format`, `ledger-v8`
-- **UI**: React 18, React Router 7, Zustand 5, TailwindCSS 3
-- **Build**: Vite 6, `@crxjs/vite-plugin` (MV3), TypeScript 5.9
-- **Crypto**: `@scure/bip39` (mnemonic generation)
+- [Integration Guide](docs/WALLET-INTEGRATION-GUIDE.md) — for AI agents and developers building Midnight wallets
+- [SDK Reference](docs/sdk-reference/) — wallet-sdk v3.0.0 architecture, package APIs, code examples
 
 ## Scripts
 
@@ -204,7 +107,18 @@ Proof server: `localhost:6300` (all environments).
 | `npm run build` | TypeScript check + Vite production build |
 | `npm run dev` | Vite dev server with HMR |
 | `npm run typecheck` | TypeScript `--noEmit` check |
+| `npm run preview` | Vite preview server |
+
+## Dependencies
+
+| Category | Packages |
+|---|---|
+| Midnight SDK | `wallet-sdk-facade`, `wallet-sdk-hd`, `ledger-v8`, `dapp-connector-api` |
+| UI | React 18, React Router 7, Zustand 5, TailwindCSS 3 |
+| Storage | `idb` (IndexedDB), RxJS 7 |
+| Build | Vite 6, `@crxjs/vite-plugin`, TypeScript 5.9 |
+| Crypto | `@scure/bip39` |
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE).
