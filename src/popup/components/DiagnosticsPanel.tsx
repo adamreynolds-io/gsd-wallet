@@ -86,63 +86,58 @@ export function DiagnosticsPanel() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-midnight-900">
-      {/* Header */}
+      {/* Header: title + level filters + actions */}
       <div className="flex items-center gap-1 px-2 pt-1.5 pb-1 shrink-0 border-b border-midnight-500">
         <span className="text-xs uppercase tracking-wider text-gray-500">Events</span>
         <span className="text-xs text-gray-600">({filtered.length})</span>
+        <span className="mx-1 text-midnight-500">|</span>
+        <AllNoneBtn
+          allOn={DIAGNOSTIC_LEVELS.every((l) => levelFilter[l])}
+          onToggle={(on) => DIAGNOSTIC_LEVELS.forEach((l) => setLevel(l, on))}
+        />
+        {DIAGNOSTIC_LEVELS.map((level) => (
+          <label key={level} className={`flex items-center gap-0.5 text-xs cursor-pointer ${LEVEL_CHECK_COLORS[level]}`}>
+            <input
+              type="checkbox"
+              checked={levelFilter[level]}
+              onChange={(e) => setLevel(level, e.target.checked)}
+              className="w-3 h-3 rounded accent-current"
+            />
+            {LEVEL_LABELS[level]}
+          </label>
+        ))}
         <div className="flex-1" />
         <button
           onClick={() => setExpandCollapseSignal({ action: 'expand', tick: Date.now() })}
           className="p-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-midnight-800 font-mono text-xs"
-          title="Expand all events with details"
+          title="Expand all"
         >+</button>
         <button
           onClick={() => setExpandCollapseSignal({ action: 'collapse', tick: Date.now() })}
           className="p-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-midnight-800 font-mono text-xs"
-          title="Collapse all expanded events"
+          title="Collapse all"
         >&minus;</button>
-        <IconBtn icon="copy" title="Copy all visible (filtered) events as JSON to clipboard" onClick={copyAll} />
+        <IconBtn icon="copy" title="Copy all visible events as JSON" onClick={copyAll} />
         <IconBtn icon="trash" title="Clear events" onClick={clearEvents} />
       </div>
 
-      {/* Filters */}
-      <div className="px-2 py-1 shrink-0 border-b border-midnight-500 space-y-0.5">
-        <div className="flex flex-wrap gap-x-2 gap-y-0.5 items-center">
-          <button
-            onClick={() => {
-              const allOn = DIAGNOSTIC_LEVELS.every((l) => levelFilter[l]) && DIAGNOSTIC_CATEGORIES.every((c) => categoryFilter[c]);
-              DIAGNOSTIC_LEVELS.forEach((l) => setLevel(l, !allOn));
-              DIAGNOSTIC_CATEGORIES.forEach((c) => setCategory(c, !allOn));
-            }}
-            className="text-xs px-1 py-0 rounded bg-midnight-800 text-gray-500 hover:text-gray-200 mr-1"
-          >
-            {DIAGNOSTIC_LEVELS.every((l) => levelFilter[l]) && DIAGNOSTIC_CATEGORIES.every((c) => categoryFilter[c]) ? 'None' : 'All'}
-          </button>
-          {DIAGNOSTIC_LEVELS.map((level) => (
-            <label key={level} className={`flex items-center gap-0.5 text-xs cursor-pointer ${LEVEL_CHECK_COLORS[level]}`}>
-              <input
-                type="checkbox"
-                checked={levelFilter[level]}
-                onChange={(e) => setLevel(level, e.target.checked)}
-                className="w-3 h-3 rounded accent-current"
-              />
-              {LEVEL_LABELS[level]}
-            </label>
-          ))}
-        </div>
-        <div className="flex flex-wrap gap-x-2 gap-y-0.5">
-          {DIAGNOSTIC_CATEGORIES.map((cat) => (
-            <label key={cat} className={`flex items-center gap-0.5 text-xs cursor-pointer ${CATEGORY_COLORS[cat]}`}>
-              <input
-                type="checkbox"
-                checked={categoryFilter[cat]}
-                onChange={(e) => setCategory(cat, e.target.checked)}
-                className="w-3 h-3 rounded accent-current"
-              />
-              {cat}
-            </label>
-          ))}
-        </div>
+      {/* Category filters */}
+      <div className="flex items-center gap-x-2 gap-y-0.5 px-2 py-0.5 shrink-0 border-b border-midnight-500">
+        <AllNoneBtn
+          allOn={DIAGNOSTIC_CATEGORIES.every((c) => categoryFilter[c])}
+          onToggle={(on) => DIAGNOSTIC_CATEGORIES.forEach((c) => setCategory(c, on))}
+        />
+        {DIAGNOSTIC_CATEGORIES.map((cat) => (
+          <label key={cat} className={`flex items-center gap-0.5 text-xs cursor-pointer ${CATEGORY_COLORS[cat]}`}>
+            <input
+              type="checkbox"
+              checked={categoryFilter[cat]}
+              onChange={(e) => setCategory(cat, e.target.checked)}
+              className="w-3 h-3 rounded accent-current"
+            />
+            {cat}
+          </label>
+        ))}
       </div>
 
       {/* Event list */}
@@ -242,6 +237,17 @@ const ICONS = {
   trash: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>,
   check: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4caf50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>,
 } as const;
+
+function AllNoneBtn({ allOn, onToggle }: { allOn: boolean; onToggle: (on: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onToggle(!allOn)}
+      className="text-xs px-1 py-0 rounded bg-midnight-800 text-gray-500 hover:text-gray-200"
+    >
+      {allOn ? 'None' : 'All'}
+    </button>
+  );
+}
 
 function IconBtn({ icon, title, onClick }: { icon: keyof typeof ICONS; title: string; onClick: () => void }) {
   const [flash, setFlash] = useState(false);
