@@ -188,7 +188,7 @@ Proof server: `localhost:6300` (all environments).
 
 ## Known issues
 
-- **Segment ID collision in DApp transaction balancing** — [#10](https://github.com/adamreynolds-io/gsd-wallet/issues/10). `balanceUnsealedTransaction` can fail with `IntentSegmentIdCollision`. Works in Lace and the test harness, so likely an integration issue in GSD wallet. Retry workaround in place.
+- **Segment ID collision in DApp transaction balancing** — [#10](https://github.com/adamreynolds-io/gsd-wallet/issues/10). `balanceUnsealedTransaction` can fail with `IntentSegmentIdCollision`. Works in Lace and the test harness, so likely an integration issue. No workaround — needs proper investigation.
 
 ## Dependencies
 
