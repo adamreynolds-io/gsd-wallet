@@ -38,6 +38,32 @@ const LEVEL_LABELS: Record<DiagnosticLevel, string> = {
   debug: 'DBG', info: 'INF', warn: 'WRN', error: 'ERR',
 };
 
+const LEVEL_TOOLTIPS: Record<DiagnosticLevel, string> = {
+  debug: 'Debug — verbose diagnostic output',
+  info: 'Info — normal operations',
+  warn: 'Warning — potential issues',
+  error: 'Error — failures and exceptions',
+};
+
+const CATEGORY_SHORT: Record<DiagnosticCategory, string> = {
+  sw: 'SW', wallet: 'Wal', state: 'Sta', dapp: 'DApp',
+  api: 'API', popup: 'Pop', tx: 'Tx', indexer: 'Idx',
+  storage: 'Sto', error: 'Err',
+};
+
+const CATEGORY_TOOLTIPS: Record<DiagnosticCategory, string> = {
+  sw: 'Service worker lifecycle',
+  wallet: 'Wallet init, keys, facade',
+  state: 'Sync status transitions',
+  dapp: 'DApp connect/disconnect',
+  api: 'DApp API method calls',
+  popup: 'Popup message handling',
+  tx: 'Transaction phases (balance, sign, prove, submit)',
+  indexer: 'GraphQL indexer queries',
+  storage: 'IndexedDB operations',
+  error: 'Errors at any layer',
+};
+
 export function DiagnosticsPanel() {
   const events = usePopupStore((s) => s.diagnosticEvents);
   const levelFilter = usePopupStore((s) => s.diagnosticLevelFilter);
@@ -87,16 +113,17 @@ export function DiagnosticsPanel() {
   return (
     <div className="flex flex-col h-full overflow-hidden bg-midnight-900">
       {/* Header: title + level filters + actions */}
-      <div className="flex items-center gap-1 px-2 pt-1.5 pb-1 shrink-0 border-b border-midnight-500">
+      <div className="flex items-center gap-1.5 px-2 pt-1.5 pb-1 shrink-0 border-b border-midnight-500">
         <span className="text-xs uppercase tracking-wider text-gray-500">Events</span>
         <span className="text-xs text-gray-600">({filtered.length})</span>
-        <span className="mx-1 text-midnight-500">|</span>
-        <AllNoneBtn
-          allOn={DIAGNOSTIC_LEVELS.every((l) => levelFilter[l])}
-          onToggle={(on) => DIAGNOSTIC_LEVELS.forEach((l) => setLevel(l, on))}
+        <span className="mx-0.5 text-midnight-500">|</span>
+        <SelectAllCheck
+          checked={DIAGNOSTIC_LEVELS.every((l) => levelFilter[l])}
+          onChange={(on) => DIAGNOSTIC_LEVELS.forEach((l) => setLevel(l, on))}
+          title="Toggle all log levels"
         />
         {DIAGNOSTIC_LEVELS.map((level) => (
-          <label key={level} className={`flex items-center gap-0.5 text-xs cursor-pointer ${LEVEL_CHECK_COLORS[level]}`}>
+          <label key={level} className={`flex items-center gap-0.5 text-xs cursor-pointer ${LEVEL_CHECK_COLORS[level]}`} title={LEVEL_TOOLTIPS[level]}>
             <input
               type="checkbox"
               checked={levelFilter[level]}
@@ -122,20 +149,21 @@ export function DiagnosticsPanel() {
       </div>
 
       {/* Category filters */}
-      <div className="flex items-center gap-x-2 gap-y-0.5 px-2 py-0.5 shrink-0 border-b border-midnight-500">
-        <AllNoneBtn
-          allOn={DIAGNOSTIC_CATEGORIES.every((c) => categoryFilter[c])}
-          onToggle={(on) => DIAGNOSTIC_CATEGORIES.forEach((c) => setCategory(c, on))}
+      <div className="flex items-center gap-x-1.5 gap-y-0.5 px-2 py-0.5 shrink-0 border-b border-midnight-500">
+        <SelectAllCheck
+          checked={DIAGNOSTIC_CATEGORIES.every((c) => categoryFilter[c])}
+          onChange={(on) => DIAGNOSTIC_CATEGORIES.forEach((c) => setCategory(c, on))}
+          title="Toggle all categories"
         />
         {DIAGNOSTIC_CATEGORIES.map((cat) => (
-          <label key={cat} className={`flex items-center gap-0.5 text-xs cursor-pointer ${CATEGORY_COLORS[cat]}`}>
+          <label key={cat} className={`flex items-center gap-0.5 text-xs cursor-pointer ${CATEGORY_COLORS[cat]}`} title={CATEGORY_TOOLTIPS[cat]}>
             <input
               type="checkbox"
               checked={categoryFilter[cat]}
               onChange={(e) => setCategory(cat, e.target.checked)}
               className="w-3 h-3 rounded accent-current"
             />
-            {cat}
+            {CATEGORY_SHORT[cat]}
           </label>
         ))}
       </div>
@@ -238,14 +266,21 @@ const ICONS = {
   check: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4caf50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>,
 } as const;
 
-function AllNoneBtn({ allOn, onToggle }: { allOn: boolean; onToggle: (on: boolean) => void }) {
+function SelectAllCheck({ checked, onChange, title }: {
+  checked: boolean;
+  onChange: (on: boolean) => void;
+  title: string;
+}) {
   return (
-    <button
-      onClick={() => onToggle(!allOn)}
-      className="text-xs px-1 py-0 rounded bg-midnight-800 text-gray-500 hover:text-gray-200"
-    >
-      {allOn ? 'None' : 'All'}
-    </button>
+    <label className="flex items-center gap-0.5 text-xs cursor-pointer text-gray-500" title={title}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="w-3 h-3 rounded accent-current"
+      />
+      All
+    </label>
   );
 }
 
