@@ -12,7 +12,7 @@ Chrome extension wallet for dApp developers building on the [Midnight](https://m
 
 ## Features
 
-- **Multi-environment** — Undeployed (localhost), DevNet, QANet, Preview, PreProd, Mainnet, Mainnet VPN
+- **Multi-environment** — Undeployed (localhost), DevNet, QANet, Preview, PreProd, Mainnet
 - **Quick-start on localnet** — one-click import of 4 prefunded genesis wallets (W0-W3)
 - **Wallet management** — generate 24-word mnemonic or import seed phrase / hex seed
 - **Multi-wallet** — multiple wallets per environment with quick-switch
@@ -76,7 +76,6 @@ Type a transaction hash, block height, or contract address in the search field:
 | Preview | `rpc.preview.midnight.network` | `indexer.preview.midnight.network/api/v4/graphql` |
 | PreProd | `rpc.preprod.midnight.network` | `indexer.preprod.midnight.network/api/v4/graphql` |
 | Mainnet | `rpc.mainnet.midnight.network` | `indexer.mainnet.midnight.network/api/v4/graphql` |
-| Mainnet VPN | `td-rpc.mainnet.midnight.network` | Same as mainnet |
 
 Proof server: `localhost:6300` for all environments.
 
