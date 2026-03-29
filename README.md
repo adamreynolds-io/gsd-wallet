@@ -186,11 +186,9 @@ The UI displays a warning banner: **"Dev wallet — seeds unencrypted"**.
 
 Proof server: `localhost:6300` (all environments).
 
-## Known limitations
+## Known issues
 
-- **TX hash mismatch** — `facade.submitTransaction()` returns the SDK's internal identifier (00-prefixed, 66 hex chars) which differs from the indexer's transaction hash (64 hex chars). Diagnostic event tx hashes cannot be used for explorer lookups.
-- **Contract address not visible** — deploy transactions don't expose the contract address in the wallet; the DApp computes it client-side before submission.
-- **`balanceUnboundTransaction` hang** — the facade's balance method can hang indefinitely for certain contract call transactions (e.g., `mintAndReceive`). Under active investigation.
+- **Segment ID collision in DApp transaction balancing** — [#10](https://github.com/adamreynolds-io/gsd-wallet/issues/10). `balanceUnsealedTransaction` can fail with `IntentSegmentIdCollision`. Works in Lace and the test harness, so likely an integration issue in GSD wallet. Retry workaround in place.
 
 ## Dependencies
 
