@@ -225,7 +225,7 @@ Without `wasm-unsafe-eval`, the ledger WASM module will fail to instantiate with
 Chrome terminates idle service workers after ~30 seconds. The wallet needs to stay alive during sync:
 
 ```typescript
-chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
+chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.4 });
 chrome.alarms.onAlarm.addListener(() => { /* no-op */ });
 ```
 
@@ -621,12 +621,12 @@ Code audit performed 2026-03-28 against wallet-sdk v3.0.0 documentation.
 | WalletFacade two-step init (init + start) | Correct |
 | State serialization (BigInt, address encoding, sync progress) | Correct |
 | Balance map iteration (all token types, not just NIGHT) | Correct |
-| DApp connector API (18 methods, BigInt serialization, session TTL) | Correct |
+| DApp connector API (17 methods, BigInt serialization, session TTL) | Correct |
 | `NIGHT_TOKEN_ID` hardcoding | Correct (equivalent to `ledger.unshieldedToken().raw`) |
 
 ### Bug found and fixed
 
-**`core/transfer.ts:74-85` — conditional signing on internal transfer path.** The internal UI transfer code only signed when `tokenType === 'unshielded'`, skipping signing for shielded transfers. The DApp connector path (`connectedApiHandler.ts:308-317`) correctly signs unconditionally. **Fixed:** signing now runs whenever `unshieldedKeystore` is available, matching the DApp path and SDK examples.
+**`core/transfer.ts` — conditional signing on internal transfer path.** The internal UI transfer code originally only signed when `tokenType === 'unshielded'`, skipping signing for shielded transfers. **Fixed:** signing now runs whenever `unshieldedKeystore` is available, matching the DApp connector path and SDK examples.
 
 ### Not implemented (documented in SDK)
 
