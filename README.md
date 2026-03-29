@@ -209,4 +209,4 @@ Proof server: `localhost:6300` (all environments).
 
 ## License
 
-Internal development tool. Not for distribution.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
