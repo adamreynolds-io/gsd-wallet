@@ -400,13 +400,14 @@ function deserializeBigInts(method: string, result: unknown): unknown {
 
 ### Request timeout
 
-Add a 30-second timeout on all inpage requests to prevent hung promises:
+Add a timeout on inpage requests to prevent hung promises. Proving-heavy operations (contract calls, transfers) take 15-30+ seconds, so the timeout must be long enough to accommodate proving:
 
 ```typescript
+const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes — proving can take 30+ seconds
 const timeout = setTimeout(() => {
   window.removeEventListener('message', handleResponse);
-  reject(new Error('Request timed out after 30s'));
-}, 30_000);
+  reject(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`));
+}, REQUEST_TIMEOUT_MS);
 ```
 
 **Reference:** `gsd-wallet/src/content-script/inpage.ts`
@@ -608,14 +609,6 @@ Code audit performed 2026-03-28 against wallet-sdk v3.0.0 documentation.
 ### Bug found and fixed
 
 **`core/transfer.ts:74-85` — conditional signing on internal transfer path.** The internal UI transfer code only signed when `tokenType === 'unshielded'`, skipping signing for shielded transfers. The DApp connector path (`connectedApiHandler.ts:308-317`) correctly signs unconditionally. **Fixed:** signing now runs whenever `unshieldedKeystore` is available, matching the DApp path and SDK examples.
-
-### Undocumented SDK workarounds
-
-**`connectedApiHandler.ts:150-251` — `balanceUnsealedTransaction` retry logic.** Contains a complex retry-and-fallback mechanism not documented anywhere in the SDK:
-- Waits up to 60s for pending coins to clear before balancing
-- Retries balancing 3 times for segment_id collisions
-- Falls back to returning the unbalanced transaction if balancing fails repeatedly
-- **Risk:** The fallback returns a transaction that may be rejected by the network (fees not paid)
 
 ### Not implemented (documented in SDK)
 

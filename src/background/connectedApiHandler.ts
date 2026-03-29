@@ -162,89 +162,20 @@ export async function handleApiCall(
         ) as unknown as ledgerTypes.Transaction<
           ledgerTypes.SignatureEnabled, ledgerTypes.Proof, ledgerTypes.PreBinding
         >;
-        // Wait for pending coins to clear before balancing (SDK requires available coins)
-        const wallet = requireWallet();
-        if (wallet.latestState) {
-          const hasPending =
-            wallet.latestState.shielded.pendingCoins.length > 0 ||
-            wallet.latestState.unshielded.pendingCoins.length > 0 ||
-            wallet.latestState.dust.pendingCoins.length > 0;
-          if (hasPending) {
-            console.log('[GSD] balanceUnsealedTransaction: waiting for pending coins to clear...');
-            const deadline = Date.now() + 60_000;
-            while (Date.now() < deadline) {
-              await new Promise((r) => setTimeout(r, 2_000));
-              const current = walletManager.getActiveWallet()?.latestState;
-              if (!current) break;
-              const still =
-                current.shielded.pendingCoins.length > 0 ||
-                current.unshielded.pendingCoins.length > 0 ||
-                current.dust.pendingCoins.length > 0;
-              if (!still) {
-                console.log('[GSD] balanceUnsealedTransaction: pending coins cleared');
-                break;
-              }
-            }
-          }
-        }
 
-        // Retry balancing up to 3 times — segment_id collisions are non-deterministic
-        let recipe: Awaited<ReturnType<typeof facade.balanceUnboundTransaction>> | undefined;
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            console.log(`[GSD] balanceUnsealedTransaction: balancing (attempt ${attempt + 1})...`);
-            const balancePromise = facade.balanceUnboundTransaction(
-              tx, keys, { ttl: new Date(Date.now() + 30 * 60 * 1000) },
-            );
-            const timeoutPromise = new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('balanceUnboundTransaction timed out after 120s')), 120_000),
-            );
-            recipe = await Promise.race([balancePromise, timeoutPromise]);
-            break;
-          } catch (balanceErr) {
-            const msg = balanceErr instanceof Error ? balanceErr.message : String(balanceErr);
-            if (msg.includes('collision') && attempt < 2) {
-              console.warn(`[GSD] balanceUnsealedTransaction: segment collision, retrying...`);
-              continue;
-            }
-            throw balanceErr;
-          }
-        }
-        if (!recipe) return err('InternalError', 'Failed to balance transaction after retries');
+        console.log('[GSD] balanceUnsealedTransaction: balancing...');
+        const recipe = await facade.balanceUnboundTransaction(
+          tx, keys, { ttl: new Date(Date.now() + 30 * 60 * 1000) },
+        );
+
         console.log('[GSD] balanceUnsealedTransaction: signing...');
         const signed = keystore
           ? await facade.signRecipe(recipe, (payload) => keystore.signData(payload))
           : recipe;
+
         console.log('[GSD] balanceUnsealedTransaction: finalizing (proving)...');
-        // Manual finalization to handle segment_id collision:
-        // Instead of facade.finalizeRecipe() which merges and can collide,
-        // we bind the base tx and prove+merge the balancing tx separately with retry
-        const signedRecipe = signed as { type: string; baseTransaction: unknown; balancingTransaction?: unknown };
-        if (signedRecipe.type === 'UNBOUND_TRANSACTION') {
-          const baseTx = signedRecipe.baseTransaction as { bind(): ledgerTypes.FinalizedTransaction };
-          const boundBase = baseTx.bind();
-          if (signedRecipe.balancingTransaction) {
-            const balancingTx = signedRecipe.balancingTransaction as ledgerTypes.UnprovenTransaction;
-            const provenBalancing = await facade.finalizeTransaction(balancingTx);
-            try {
-              const merged = boundBase.merge(provenBalancing);
-              console.log('[GSD] balanceUnsealedTransaction: done (merged)');
-              const resultBytes = merged.serialize();
-              return ok({ tx: bytesToHex(resultBytes) });
-            } catch (mergeErr) {
-              // Segment collision — return just the base tx without balancing
-              // The dApp can still submit it, fees may not be paid
-              console.warn('[GSD] balanceUnsealedTransaction: merge collision, returning base only:', mergeErr);
-              const resultBytes = boundBase.serialize();
-              return ok({ tx: bytesToHex(resultBytes) });
-            }
-          }
-          console.log('[GSD] balanceUnsealedTransaction: done (no balancing needed)');
-          const resultBytes = boundBase.serialize();
-          return ok({ tx: bytesToHex(resultBytes) });
-        }
-        // Fallback for other recipe types
         const finalized = await facade.finalizeRecipe(signed as typeof recipe);
+
         console.log('[GSD] balanceUnsealedTransaction: done');
         const resultBytes = finalized.serialize();
         return ok({ tx: bytesToHex(resultBytes) });
