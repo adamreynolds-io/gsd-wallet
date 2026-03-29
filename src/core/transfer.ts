@@ -72,13 +72,7 @@ export async function executeTransfer(
     );
 
     let signedRecipe: BalancingRecipe = recipe;
-    if (params.tokenType === 'unshielded') {
-      if (!unshieldedKeystore) {
-        return {
-          success: false,
-          error: 'Unshielded keystore required for unshielded transfers',
-        };
-      }
+    if (unshieldedKeystore) {
       signedRecipe = await facade.signRecipe(recipe, (payload) =>
         unshieldedKeystore.signData(payload),
       );
