@@ -22,16 +22,16 @@ function sendRequest(payload: unknown): Promise<unknown> {
 
     const timeout = setTimeout(() => {
       window.removeEventListener('message', handleResponse);
-      const err = new Error('Request timed out after 30s') as Error & {
+      const err = new Error('Request timed out after 120s') as Error & {
         type: string;
         code: string;
         reason: string;
       };
       err.type = 'DAppConnectorAPIError';
       err.code = 'InternalError';
-      err.reason = 'Request timed out after 30s';
+      err.reason = 'Request timed out after 120s';
       reject(err);
-    }, 30_000);
+    }, 120_000);
 
     function handleResponse(event: MessageEvent) {
       if (event.source !== window) return;

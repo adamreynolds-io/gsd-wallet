@@ -1,9 +1,21 @@
 import { create } from 'zustand';
 import type {
+  DiagnosticCategory,
+  DiagnosticEvent,
+  DiagnosticLevel,
   SerializedWalletState,
   WalletStatus,
   Environment,
 } from '@shared/types';
+import { DIAGNOSTIC_LEVELS, DIAGNOSTIC_CATEGORIES } from '@shared/types';
+
+const MAX_DIAGNOSTIC_EVENTS = 1000;
+
+function makeFilterRecord<T extends string>(keys: readonly T[]): Record<T, boolean> {
+  const rec = {} as Record<T, boolean>;
+  for (const k of keys) { rec[k] = true; }
+  return rec;
+}
 
 interface PopupState {
   status: WalletStatus;
@@ -12,6 +24,10 @@ interface PopupState {
   environment: Environment;
   error: string | null;
   statusMessage: { text: string; type: 'success' | 'error' | 'info' } | null;
+
+  diagnosticEvents: DiagnosticEvent[];
+  diagnosticLevelFilter: Record<DiagnosticLevel, boolean>;
+  diagnosticCategoryFilter: Record<DiagnosticCategory, boolean>;
 
   setStatus: (status: WalletStatus) => void;
   setHasVault: (hasVault: boolean) => void;
@@ -24,6 +40,12 @@ interface PopupState {
     duration?: number,
   ) => void;
   clearStatusMessage: () => void;
+
+  addDiagnosticEvent: (event: DiagnosticEvent) => void;
+  addDiagnosticEventsBatch: (events: DiagnosticEvent[]) => void;
+  setDiagnosticLevel: (level: DiagnosticLevel, on: boolean) => void;
+  setDiagnosticCategory: (category: DiagnosticCategory, on: boolean) => void;
+  clearDiagnosticEvents: () => void;
 }
 
 export const usePopupStore = create<PopupState>((set) => ({
@@ -33,6 +55,10 @@ export const usePopupStore = create<PopupState>((set) => ({
   environment: 'dev',
   error: null,
   statusMessage: null,
+
+  diagnosticEvents: [],
+  diagnosticLevelFilter: makeFilterRecord(DIAGNOSTIC_LEVELS),
+  diagnosticCategoryFilter: makeFilterRecord(DIAGNOSTIC_CATEGORIES),
 
   setStatus: (status) => set({ status }),
   setHasVault: (hasVault) => set({ hasVault }),
@@ -51,4 +77,26 @@ export const usePopupStore = create<PopupState>((set) => ({
     }
   },
   clearStatusMessage: () => set({ statusMessage: null }),
+
+  addDiagnosticEvent: (event) =>
+    set((s) => {
+      const events = [...s.diagnosticEvents, event];
+      if (events.length > MAX_DIAGNOSTIC_EVENTS) events.shift();
+      return { diagnosticEvents: events };
+    }),
+
+  addDiagnosticEventsBatch: (events) =>
+    set({ diagnosticEvents: events.slice(-MAX_DIAGNOSTIC_EVENTS) }),
+
+  setDiagnosticLevel: (level, on) =>
+    set((s) => ({
+      diagnosticLevelFilter: { ...s.diagnosticLevelFilter, [level]: on },
+    })),
+
+  setDiagnosticCategory: (category, on) =>
+    set((s) => ({
+      diagnosticCategoryFilter: { ...s.diagnosticCategoryFilter, [category]: on },
+    })),
+
+  clearDiagnosticEvents: () => set({ diagnosticEvents: [] }),
 }));

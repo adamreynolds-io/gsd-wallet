@@ -7,6 +7,8 @@ export function useWalletConnection(): void {
   const setWalletState = usePopupStore((s) => s.setWalletState);
   const setHasVault = usePopupStore((s) => s.setHasVault);
   const setStatus = usePopupStore((s) => s.setStatus);
+  const addDiagnosticEvent = usePopupStore((s) => s.addDiagnosticEvent);
+  const addDiagnosticEventsBatch = usePopupStore((s) => s.addDiagnosticEventsBatch);
 
   useEffect(() => {
     const port = chrome.runtime.connect({ name: 'gsd-popup' });
@@ -18,6 +20,10 @@ export function useWalletConnection(): void {
         if (hasVault !== false) {
           setWalletState(msg.state);
         }
+      } else if (msg.type === 'DIAGNOSTIC_EVENT') {
+        addDiagnosticEvent(msg.event);
+      } else if (msg.type === 'DIAGNOSTIC_EVENTS_BATCH') {
+        addDiagnosticEventsBatch(msg.events);
       }
     });
 
@@ -39,9 +45,10 @@ export function useWalletConnection(): void {
     );
 
     port.postMessage({ type: 'GET_STATE' });
+    port.postMessage({ type: 'GET_DIAGNOSTIC_BACKLOG' });
 
     return () => {
       port.disconnect();
     };
-  }, [setWalletState, setHasVault, setStatus]);
+  }, [setWalletState, setHasVault, setStatus, addDiagnosticEvent, addDiagnosticEventsBatch]);
 }

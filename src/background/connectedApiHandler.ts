@@ -2,6 +2,7 @@ import { MidnightBech32m, DustAddress } from '@midnight-ntwrk/wallet-sdk-address
 import type * as ledgerTypes from '@midnight-ntwrk/ledger-v8';
 import * as walletManager from './walletManager';
 import { getEnvironmentConfig } from '@shared/environments';
+import { emit } from './diagnosticLogger';
 
 type ApiResult = { result: unknown } | { error: { code: string; reason: string } };
 
@@ -36,10 +37,6 @@ function hexToBytes(hex: string): Uint8Array {
   return bytes;
 }
 
-/**
- * Serialize bigint values in a Record as strings for postMessage transport.
- * The inpage script converts them back to bigint before returning to the dApp.
- */
 function serializeBigIntRecord(record: Record<string, bigint>): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [k, v] of Object.entries(record)) {
@@ -48,318 +45,346 @@ function serializeBigIntRecord(record: Record<string, bigint>): Record<string, s
   return result;
 }
 
+function hexPreview(hex: string): string {
+  return hex.length > 64 ? `${hex.slice(0, 64)}... (${hex.length} chars)` : hex;
+}
+
+// Shared context for the current API call — allows inner functions to
+// pass metadata (like txHash) up to the outer completion event.
+let callContext: Record<string, unknown> = {};
+
+export function setCallContext(key: string, value: unknown): void {
+  callContext[key] = value;
+}
+
 export async function handleApiCall(
   method: string,
   args: unknown[],
 ): Promise<ApiResult> {
+  const t0 = Date.now();
+  callContext = {};
+  emit('info', 'api', `${method} called`, { method, args: args.map((a) => typeof a === 'string' ? hexPreview(a) : a) });
+
   try {
-    switch (method) {
-      case 'getShieldedBalances': {
-        const { latestState } = requireWallet();
-        if (!latestState) return ok({});
-        return ok(serializeBigIntRecord(latestState.shielded.balances));
-      }
+    await walletManager.waitForReady();
 
-      case 'getUnshieldedBalances': {
-        const { latestState } = requireWallet();
-        if (!latestState) return ok({});
-        return ok(serializeBigIntRecord(latestState.unshielded.balances));
-      }
+    const result = await handleApiCallInner(method, args);
 
-      case 'getDustBalance': {
-        const { latestState } = requireWallet();
-        if (!latestState) return ok({ cap: '0', balance: '0' });
-        const balance = latestState.dust.balance(new Date());
-        return ok({ cap: String(balance), balance: String(balance) });
-      }
-
-      case 'getShieldedAddresses': {
-        const wallet = requireWallet();
-        const { latestState, environment } = wallet;
-        if (!latestState) return err('InternalError', 'State not available');
-        const nid = getEnvironmentConfig(environment).networkId;
-        const addr = latestState.shielded.address;
-        const coinPk = latestState.shielded.coinPublicKey;
-        const encPk = latestState.shielded.encryptionPublicKey;
-        return ok({
-          shieldedAddress: addr ? MidnightBech32m.encode(nid, addr).toString() : '',
-          shieldedCoinPublicKey: coinPk ? bytesToHex(new Uint8Array(coinPk.data)) : '',
-          shieldedEncryptionPublicKey: encPk ? bytesToHex(new Uint8Array(encPk.data)) : '',
-        });
-      }
-
-      case 'getUnshieldedAddress': {
-        const wallet = requireWallet();
-        const { latestState, environment } = wallet;
-        if (!latestState) return err('InternalError', 'State not available');
-        const nid = getEnvironmentConfig(environment).networkId;
-        const addr = latestState.unshielded.address;
-        return ok({
-          unshieldedAddress: addr ? MidnightBech32m.encode(nid, addr).toString() : '',
-        });
-      }
-
-      case 'getDustAddress': {
-        const wallet = requireWallet();
-        const { latestState, environment } = wallet;
-        if (!latestState) return err('InternalError', 'State not available');
-        const nid = getEnvironmentConfig(environment).networkId;
-        const pk = latestState.dust.publicKey;
-        return ok({
-          dustAddress: pk ? DustAddress.encodePublicKey(nid, pk) : '',
-        });
-      }
-
-      case 'getConfiguration': {
-        const { environment } = requireWallet();
-        const config = getEnvironmentConfig(environment);
-        return ok({
-          indexerUri: config.indexerHttpUrl,
-          indexerWsUri: config.indexerWsUrl,
-          proverServerUri: config.provingServerUrl,
-          substrateNodeUri: config.nodeWsUrl,
-          networkId: config.networkId,
-        });
-      }
-
-      case 'getConnectionStatus': {
-        const wallet = walletManager.getActiveWallet();
-        if (!wallet?.latestState) {
-          return ok({ status: 'disconnected' });
-        }
-        return ok({
-          status: 'connected',
-          networkId: getEnvironmentConfig(wallet.environment).networkId,
-        });
-      }
-
-      // --- Transaction methods: return hex-encoded tx, do NOT submit ---
-
-      case 'submitTransaction': {
-        const { facade } = requireWallet();
-        const txHex = args[0] as string;
-        const ledger = await import('@midnight-ntwrk/ledger-v8');
-        const txBytes = hexToBytes(txHex);
-        const tx = ledger.Transaction.deserialize(
-          'signature', 'proof', 'binding', txBytes,
-        ) as unknown as ledgerTypes.FinalizedTransaction;
-        await facade.submitTransaction(tx);
-        return ok(undefined);
-      }
-
-      case 'balanceUnsealedTransaction': {
-        console.log('[GSD] balanceUnsealedTransaction: start');
-        const { facade } = requireWallet();
-        const txHex = args[0] as string;
-        const keys = walletManager.getSecretKeys();
-        const keystore = walletManager.getKeystore();
-        if (!keys) return err('InternalError', 'Keys not available');
-        const ledger = await import('@midnight-ntwrk/ledger-v8');
-        console.log('[GSD] balanceUnsealedTransaction: deserializing tx, hex length:', txHex.length);
-        const txBytes = hexToBytes(txHex);
-        const tx = ledger.Transaction.deserialize(
-          'signature', 'proof', 'pre-binding', txBytes,
-        ) as unknown as ledgerTypes.Transaction<
-          ledgerTypes.SignatureEnabled, ledgerTypes.Proof, ledgerTypes.PreBinding
-        >;
-        // Wait for pending coins to clear before balancing (SDK requires available coins)
-        const wallet = requireWallet();
-        if (wallet.latestState) {
-          const hasPending =
-            wallet.latestState.shielded.pendingCoins.length > 0 ||
-            wallet.latestState.unshielded.pendingCoins.length > 0 ||
-            wallet.latestState.dust.pendingCoins.length > 0;
-          if (hasPending) {
-            console.log('[GSD] balanceUnsealedTransaction: waiting for pending coins to clear...');
-            const deadline = Date.now() + 60_000;
-            while (Date.now() < deadline) {
-              await new Promise((r) => setTimeout(r, 2_000));
-              const current = walletManager.getActiveWallet()?.latestState;
-              if (!current) break;
-              const still =
-                current.shielded.pendingCoins.length > 0 ||
-                current.unshielded.pendingCoins.length > 0 ||
-                current.dust.pendingCoins.length > 0;
-              if (!still) {
-                console.log('[GSD] balanceUnsealedTransaction: pending coins cleared');
-                break;
-              }
-            }
-          }
-        }
-
-        // Retry balancing up to 3 times — segment_id collisions are non-deterministic
-        let recipe: Awaited<ReturnType<typeof facade.balanceUnboundTransaction>> | undefined;
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            console.log(`[GSD] balanceUnsealedTransaction: balancing (attempt ${attempt + 1})...`);
-            const balancePromise = facade.balanceUnboundTransaction(
-              tx, keys, { ttl: new Date(Date.now() + 30 * 60 * 1000) },
-            );
-            const timeoutPromise = new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('balanceUnboundTransaction timed out after 120s')), 120_000),
-            );
-            recipe = await Promise.race([balancePromise, timeoutPromise]);
-            break;
-          } catch (balanceErr) {
-            const msg = balanceErr instanceof Error ? balanceErr.message : String(balanceErr);
-            if (msg.includes('collision') && attempt < 2) {
-              console.warn(`[GSD] balanceUnsealedTransaction: segment collision, retrying...`);
-              continue;
-            }
-            throw balanceErr;
-          }
-        }
-        if (!recipe) return err('InternalError', 'Failed to balance transaction after retries');
-        console.log('[GSD] balanceUnsealedTransaction: signing...');
-        const signed = keystore
-          ? await facade.signRecipe(recipe, (payload) => keystore.signData(payload))
-          : recipe;
-        console.log('[GSD] balanceUnsealedTransaction: finalizing (proving)...');
-        // Manual finalization to handle segment_id collision:
-        // Instead of facade.finalizeRecipe() which merges and can collide,
-        // we bind the base tx and prove+merge the balancing tx separately with retry
-        const signedRecipe = signed as { type: string; baseTransaction: unknown; balancingTransaction?: unknown };
-        if (signedRecipe.type === 'UNBOUND_TRANSACTION') {
-          const baseTx = signedRecipe.baseTransaction as { bind(): ledgerTypes.FinalizedTransaction };
-          const boundBase = baseTx.bind();
-          if (signedRecipe.balancingTransaction) {
-            const balancingTx = signedRecipe.balancingTransaction as ledgerTypes.UnprovenTransaction;
-            const provenBalancing = await facade.finalizeTransaction(balancingTx);
-            try {
-              const merged = boundBase.merge(provenBalancing);
-              console.log('[GSD] balanceUnsealedTransaction: done (merged)');
-              const resultBytes = merged.serialize();
-              return ok({ tx: bytesToHex(resultBytes) });
-            } catch (mergeErr) {
-              // Segment collision — return just the base tx without balancing
-              // The dApp can still submit it, fees may not be paid
-              console.warn('[GSD] balanceUnsealedTransaction: merge collision, returning base only:', mergeErr);
-              const resultBytes = boundBase.serialize();
-              return ok({ tx: bytesToHex(resultBytes) });
-            }
-          }
-          console.log('[GSD] balanceUnsealedTransaction: done (no balancing needed)');
-          const resultBytes = boundBase.serialize();
-          return ok({ tx: bytesToHex(resultBytes) });
-        }
-        // Fallback for other recipe types
-        const finalized = await facade.finalizeRecipe(signed as typeof recipe);
-        console.log('[GSD] balanceUnsealedTransaction: done');
-        const resultBytes = finalized.serialize();
-        return ok({ tx: bytesToHex(resultBytes) });
-      }
-
-      case 'balanceSealedTransaction': {
-        const { facade } = requireWallet();
-        const txHex = args[0] as string;
-        const keys = walletManager.getSecretKeys();
-        if (!keys) return err('InternalError', 'Keys not available');
-        const ledger = await import('@midnight-ntwrk/ledger-v8');
-        const txBytes = hexToBytes(txHex);
-        const tx = ledger.Transaction.deserialize(
-          'signature', 'proof', 'binding', txBytes,
-        ) as unknown as ledgerTypes.FinalizedTransaction;
-        const recipe = await facade.balanceFinalizedTransaction(
-          tx, keys, { ttl: new Date(Date.now() + 30 * 60 * 1000) },
-        );
-        const finalized = await facade.finalizeRecipe(recipe);
-        const resultBytes = finalized.serialize();
-        return ok({ tx: bytesToHex(resultBytes) });
-      }
-
-      case 'makeTransfer': {
-        const { facade } = requireWallet();
-        const desiredOutputs = args[0] as Array<{
-          kind: string;
-          type: string;
-          value: string | bigint;
-          recipient: string;
-        }>;
-        const keys = walletManager.getSecretKeys();
-        const keystore = walletManager.getKeystore();
-        const networkId = walletManager.getNetworkId();
-        if (!keys || !networkId) return err('InternalError', 'Keys not available');
-
-        const addressFormat = await import('@midnight-ntwrk/wallet-sdk-address-format');
-
-        const transfers = desiredOutputs.map((o) => {
-          const parsed = addressFormat.MidnightBech32m.parse(o.recipient);
-          if (o.kind === 'shielded') {
-            return {
-              type: 'shielded' as const,
-              outputs: [{
-                type: o.type,
-                receiverAddress: addressFormat.ShieldedAddress.codec.decode(networkId, parsed),
-                amount: BigInt(o.value),
-              }],
-            };
-          }
-          return {
-            type: 'unshielded' as const,
-            outputs: [{
-              type: o.type,
-              receiverAddress: addressFormat.UnshieldedAddress.codec.decode(networkId, parsed),
-              amount: BigInt(o.value),
-            }],
-          };
-        });
-
-        const recipe = await facade.transferTransaction(transfers, keys, {
-          ttl: new Date(Date.now() + 30 * 60 * 1000),
-        });
-        const signed = keystore
-          ? await facade.signRecipe(recipe, (payload) => keystore.signData(payload))
-          : recipe;
-        const finalized = await facade.finalizeRecipe(signed as typeof recipe);
-        // Return serialized hex — dApp calls submitTransaction separately
-        const resultBytes = finalized.serialize();
-        return ok({ tx: bytesToHex(resultBytes) });
-      }
-
-      case 'signData': {
-        const keystore = walletManager.getKeystore();
-        if (!keystore) return err('InternalError', 'Keystore not available');
-        const data = args[0] as string;
-        const options = args[1] as { encoding: string; keyType: string };
-
-        let dataBytes: Uint8Array;
-        if (options.encoding === 'hex') {
-          dataBytes = hexToBytes(data);
-        } else if (options.encoding === 'base64') {
-          dataBytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
-        } else {
-          dataBytes = new TextEncoder().encode(data);
-        }
-
-        const signature = keystore.signData(dataBytes);
-        const publicKey = keystore.getPublicKey();
-        return ok({
-          data,
-          signature: String(signature),
-          verifyingKey: String(publicKey),
-        });
-      }
-
-      case 'getTxHistory':
-        return ok([]);
-
-      case 'hintUsage':
-        return ok(undefined);
-
-      case 'getProvingProvider':
-        return err('InternalError', 'Use proverServerUri from getConfiguration() instead');
-
-      case 'makeIntent':
-        return err('InternalError', 'makeIntent not yet implemented');
-
-      default:
-        return err('InvalidRequest', `Unknown method: ${method}`);
+    if ('error' in result) {
+      emit('warn', 'api', `${method} returned error`, { method, error: result.error, ...callContext }, Date.now() - t0);
+    } else {
+      emit('info', 'api', `${method} completed`, { method, ...callContext }, Date.now() - t0);
     }
+    return result;
   } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    emit('error', 'error', `${method} threw`, { method, error: reason }, Date.now() - t0);
     if (e && typeof e === 'object' && 'code' in e && 'reason' in e) {
       return { error: e as { code: string; reason: string } };
     }
-    return err('InternalError', e instanceof Error ? e.message : 'Unknown error');
+    return err('InternalError', reason);
+  }
+}
+
+async function handleApiCallInner(
+  method: string,
+  args: unknown[],
+): Promise<ApiResult> {
+  switch (method) {
+    case 'getShieldedBalances': {
+      const { latestState } = requireWallet();
+      if (!latestState) return ok({});
+      return ok(serializeBigIntRecord(latestState.shielded.balances));
+    }
+
+    case 'getUnshieldedBalances': {
+      const { latestState } = requireWallet();
+      if (!latestState) return ok({});
+      return ok(serializeBigIntRecord(latestState.unshielded.balances));
+    }
+
+    case 'getDustBalance': {
+      const { latestState } = requireWallet();
+      if (!latestState) return ok({ cap: '0', balance: '0' });
+      const balance = latestState.dust.balance(new Date());
+      return ok({ cap: String(balance), balance: String(balance) });
+    }
+
+    case 'getShieldedAddresses': {
+      const wallet = requireWallet();
+      const { latestState, environment } = wallet;
+      if (!latestState) return err('InternalError', 'State not available');
+      const nid = getEnvironmentConfig(environment).networkId;
+      const addr = latestState.shielded.address;
+      const coinPk = latestState.shielded.coinPublicKey;
+      const encPk = latestState.shielded.encryptionPublicKey;
+      return ok({
+        shieldedAddress: addr ? MidnightBech32m.encode(nid, addr).toString() : '',
+        shieldedCoinPublicKey: coinPk ? bytesToHex(new Uint8Array(coinPk.data)) : '',
+        shieldedEncryptionPublicKey: encPk ? bytesToHex(new Uint8Array(encPk.data)) : '',
+      });
+    }
+
+    case 'getUnshieldedAddress': {
+      const wallet = requireWallet();
+      const { latestState, environment } = wallet;
+      if (!latestState) return err('InternalError', 'State not available');
+      const nid = getEnvironmentConfig(environment).networkId;
+      const addr = latestState.unshielded.address;
+      return ok({
+        unshieldedAddress: addr ? MidnightBech32m.encode(nid, addr).toString() : '',
+      });
+    }
+
+    case 'getDustAddress': {
+      const wallet = requireWallet();
+      const { latestState, environment } = wallet;
+      if (!latestState) return err('InternalError', 'State not available');
+      const nid = getEnvironmentConfig(environment).networkId;
+      const pk = latestState.dust.publicKey;
+      return ok({
+        dustAddress: pk ? DustAddress.encodePublicKey(nid, pk) : '',
+      });
+    }
+
+    case 'getConfiguration': {
+      const { environment } = requireWallet();
+      const config = getEnvironmentConfig(environment);
+      return ok({
+        indexerUri: config.indexerHttpUrl,
+        indexerWsUri: config.indexerWsUrl,
+        proverServerUri: config.provingServerUrl,
+        substrateNodeUri: config.nodeWsUrl,
+        networkId: config.networkId,
+      });
+    }
+
+    case 'getConnectionStatus': {
+      const wallet = walletManager.getActiveWallet();
+      if (!wallet?.latestState) {
+        return ok({ status: 'disconnected' });
+      }
+      return ok({
+        status: 'connected',
+        networkId: getEnvironmentConfig(wallet.environment).networkId,
+      });
+    }
+
+    case 'submitTransaction': {
+      const { facade } = requireWallet();
+      const txHex = args[0] as string;
+      emit('info', 'tx', 'submitTransaction: deserializing', { hexLength: txHex.length });
+      const ledger = await import('@midnight-ntwrk/ledger-v8');
+      const txBytes = hexToBytes(txHex);
+      const tx = ledger.Transaction.deserialize(
+        'signature', 'proof', 'binding', txBytes,
+      ) as unknown as ledgerTypes.FinalizedTransaction;
+      emit('info', 'tx', 'submitTransaction: submitting to node');
+      const submitT0 = Date.now();
+      const submittedTxId = await facade.submitTransaction(tx);
+      const txHashStr = String(submittedTxId ?? '');
+      callContext['txHash'] = txHashStr;
+      emit('info', 'tx', 'submitTransaction: submitted', { txHash: txHashStr }, Date.now() - submitT0);
+      return ok(undefined);
+    }
+
+    case 'balanceUnsealedTransaction': {
+      const { facade } = requireWallet();
+      const txHex = args[0] as string;
+      const keys = walletManager.getSecretKeys();
+      const keystore = walletManager.getKeystore();
+      if (!keys) return err('InternalError', 'Keys not available');
+
+      emit('info', 'tx', 'balanceUnsealed: deserializing', { hexLength: txHex.length });
+      const ledger = await import('@midnight-ntwrk/ledger-v8');
+      const txBytes = hexToBytes(txHex);
+      const tx = ledger.Transaction.deserialize(
+        'signature', 'proof', 'pre-binding', txBytes,
+      ) as unknown as ledgerTypes.Transaction<
+        ledgerTypes.SignatureEnabled, ledgerTypes.Proof, ledgerTypes.PreBinding
+      >;
+
+      // Extract segment IDs and contract addresses from intents
+      try {
+        const intents = tx.intents;
+        const segmentIds = intents ? Array.from(intents.keys()) : [];
+        const txInfo: Record<string, unknown> = { segmentIds, intentCount: segmentIds.length };
+
+        // Parse the full tx string for contract addresses
+        // Format: "Deploy ContractState (...)" or "Call <hex64>"
+        const txStr = tx.toString();
+        // Match any standalone 64-char hex that appears near Deploy/Call keywords
+        const allHex64 = [...txStr.matchAll(/(?:Deploy|Call|address)[^0-9a-f]*([0-9a-f]{64})/gi)];
+        if (allHex64.length > 0) {
+          txInfo['contractAddress'] = allHex64[0]![1];
+        }
+        // Also try: the address field pattern from Rust debug format
+        const addrMatch = txStr.match(/address:\s*"?([0-9a-f]{64})"?/i);
+        if (addrMatch && !txInfo['contractAddress']) {
+          txInfo['contractAddress'] = addrMatch[1];
+        }
+
+        emit('debug', 'tx', 'balanceUnsealed: tx info', txInfo);
+      } catch { /* */ }
+
+      emit('info', 'tx', 'balanceUnsealed: balancing');
+      let t = Date.now();
+      const recipe = await facade.balanceUnboundTransaction(
+        tx, keys, { ttl: new Date(Date.now() + 30 * 60 * 1000) },
+      );
+      emit('info', 'tx', 'balanceUnsealed: balanced', undefined, Date.now() - t);
+
+      emit('info', 'tx', 'balanceUnsealed: signing');
+      t = Date.now();
+      const signed = keystore
+        ? await facade.signRecipe(recipe, (payload) => keystore.signData(payload))
+        : recipe;
+      emit('info', 'tx', 'balanceUnsealed: signed', undefined, Date.now() - t);
+
+      emit('info', 'tx', 'balanceUnsealed: finalizing (proving)');
+      t = Date.now();
+      const finalized = await facade.finalizeRecipe(signed as typeof recipe);
+      emit('info', 'tx', 'balanceUnsealed: finalized', undefined, Date.now() - t);
+
+      const txId = String(finalized.identifiers()?.at(-1) ?? '');
+      setCallContext('txHash', txId);
+      const resultBytes = finalized.serialize();
+      emit('info', 'tx', 'balanceUnsealed: done', { txHash: txId, resultHexLength: resultBytes.length * 2 });
+      return ok({ tx: bytesToHex(resultBytes) });
+    }
+
+    case 'balanceSealedTransaction': {
+      const { facade } = requireWallet();
+      const txHex = args[0] as string;
+      const keys = walletManager.getSecretKeys();
+      if (!keys) return err('InternalError', 'Keys not available');
+
+      emit('info', 'tx', 'balanceSealed: deserializing', { hexLength: txHex.length });
+      const ledger = await import('@midnight-ntwrk/ledger-v8');
+      const txBytes = hexToBytes(txHex);
+      const tx = ledger.Transaction.deserialize(
+        'signature', 'proof', 'binding', txBytes,
+      ) as unknown as ledgerTypes.FinalizedTransaction;
+
+      emit('info', 'tx', 'balanceSealed: balancing');
+      let t = Date.now();
+      const recipe = await facade.balanceFinalizedTransaction(
+        tx, keys, { ttl: new Date(Date.now() + 30 * 60 * 1000) },
+      );
+      emit('info', 'tx', 'balanceSealed: balanced', undefined, Date.now() - t);
+
+      emit('info', 'tx', 'balanceSealed: finalizing (proving)');
+      t = Date.now();
+      const finalized = await facade.finalizeRecipe(recipe);
+      emit('info', 'tx', 'balanceSealed: finalized', undefined, Date.now() - t);
+
+      const sealedTxId = String(finalized.identifiers()?.at(-1) ?? '');
+      setCallContext('txHash', sealedTxId);
+      const resultBytes = finalized.serialize();
+      emit('info', 'tx', 'balanceSealed: done', { txHash: sealedTxId, resultHexLength: resultBytes.length * 2 });
+      return ok({ tx: bytesToHex(resultBytes) });
+    }
+
+    case 'makeTransfer': {
+      const { facade } = requireWallet();
+      const desiredOutputs = args[0] as Array<{
+        kind: string;
+        type: string;
+        value: string | bigint;
+        recipient: string;
+      }>;
+      const keys = walletManager.getSecretKeys();
+      const keystore = walletManager.getKeystore();
+      const networkId = walletManager.getNetworkId();
+      if (!keys || !networkId) return err('InternalError', 'Keys not available');
+
+      const addressFormat = await import('@midnight-ntwrk/wallet-sdk-address-format');
+
+      const transfers = desiredOutputs.map((o) => {
+        const parsed = addressFormat.MidnightBech32m.parse(o.recipient);
+        if (o.kind === 'shielded') {
+          return {
+            type: 'shielded' as const,
+            outputs: [{
+              type: o.type,
+              receiverAddress: addressFormat.ShieldedAddress.codec.decode(networkId, parsed),
+              amount: BigInt(o.value),
+            }],
+          };
+        }
+        return {
+          type: 'unshielded' as const,
+          outputs: [{
+            type: o.type,
+            receiverAddress: addressFormat.UnshieldedAddress.codec.decode(networkId, parsed),
+            amount: BigInt(o.value),
+          }],
+        };
+      });
+
+      emit('info', 'tx', 'makeTransfer: building recipe', { outputCount: desiredOutputs.length });
+      let t = Date.now();
+      const recipe = await facade.transferTransaction(transfers, keys, {
+        ttl: new Date(Date.now() + 30 * 60 * 1000),
+      });
+      emit('info', 'tx', 'makeTransfer: recipe built', undefined, Date.now() - t);
+
+      emit('info', 'tx', 'makeTransfer: signing');
+      t = Date.now();
+      const signed = keystore
+        ? await facade.signRecipe(recipe, (payload) => keystore.signData(payload))
+        : recipe;
+      emit('info', 'tx', 'makeTransfer: signed', undefined, Date.now() - t);
+
+      emit('info', 'tx', 'makeTransfer: finalizing (proving)');
+      t = Date.now();
+      const finalized = await facade.finalizeRecipe(signed as typeof recipe);
+      emit('info', 'tx', 'makeTransfer: finalized', undefined, Date.now() - t);
+
+      const transferTxId = String(finalized.identifiers()?.at(-1) ?? '');
+      setCallContext('txHash', transferTxId);
+      const resultBytes = finalized.serialize();
+      emit('info', 'tx', 'makeTransfer: done', { txHash: transferTxId, resultHexLength: resultBytes.length * 2 });
+      return ok({ tx: bytesToHex(resultBytes) });
+    }
+
+    case 'signData': {
+      const keystore = walletManager.getKeystore();
+      if (!keystore) return err('InternalError', 'Keystore not available');
+      const data = args[0] as string;
+      const options = args[1] as { encoding: string; keyType: string };
+
+      let dataBytes: Uint8Array;
+      if (options.encoding === 'hex') {
+        dataBytes = hexToBytes(data);
+      } else if (options.encoding === 'base64') {
+        dataBytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+      } else {
+        dataBytes = new TextEncoder().encode(data);
+      }
+
+      const signature = keystore.signData(dataBytes);
+      const publicKey = keystore.getPublicKey();
+      return ok({
+        data,
+        signature: String(signature),
+        verifyingKey: String(publicKey),
+      });
+    }
+
+    case 'getTxHistory':
+      return ok([]);
+
+    case 'hintUsage':
+      return ok(undefined);
+
+    case 'getProvingProvider':
+      return err('InternalError', 'Use proverServerUri from getConfiguration() instead');
+
+    case 'makeIntent':
+      return err('InternalError', 'makeIntent not yet implemented');
+
+    default:
+      return err('InvalidRequest', `Unknown method: ${method}`);
   }
 }
