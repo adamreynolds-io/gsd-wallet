@@ -245,7 +245,7 @@ Chrome terminates idle service workers after ~30 seconds. WebSocket connections 
 **The real fix: Persistent SDK storage.** Instead of fighting the SW lifecycle, persist the SDK's wallet state to IndexedDB so each restart resumes from the last checkpoint. The SDK provides serialization/restore on all three wallet types:
 
 ```typescript
-// Serialize — call periodically during sync (e.g. every 30s)
+// Serialize — call periodically during sync (e.g. every 10s)
 const [shielded, unshielded, dust] = await Promise.all([
   facade.shielded.serializeState(),   // Returns string
   facade.unshielded.serializeState(), // Returns string
@@ -276,7 +276,7 @@ if (checkpoint) {
 ```
 
 **Checkpointing strategy:**
-- Save every 30 seconds during sync (throttled, fire-and-forget)
+- Save every 10 seconds during sync (throttled, fire-and-forget)
 - Save when `isSynced` transitions to `true`
 - Save before `facade.stop()` on wallet lock/shutdown
 - Never block the UI or state emission on checkpoint writes
@@ -286,7 +286,7 @@ if (checkpoint) {
 
 **Scoping:** Key checkpoints by `${environment}:${accountIndex}` so each wallet/network combination has independent state.
 
-**Tested on mainnet:** With ~87k shielded + ~87k dust events, the wallet completes full sync across multiple SW restarts (Chrome kills the SW every ~60s), each time resuming from the last 30-second checkpoint. Without persistent storage, this sync never completes.
+**Tested on mainnet:** With ~87k shielded + ~87k dust events, the wallet completes full sync across multiple SW restarts (Chrome kills the SW every ~60s), each time resuming from the last 10-second checkpoint. Without persistent storage, this sync never completes.
 
 **Reference:** `gsd-wallet/src/background/sdkCheckpoint.ts`, `gsd-wallet/src/background/walletManager.ts:initializeWalletCore`, `gsd-wallet/src/shared/storage.ts`
 
