@@ -470,7 +470,7 @@ async function initializeWalletCore(
     stallCheckInterval,
   };
 
-  chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.4 });
+  chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.5 });
   emit('info', 'wallet', 'WalletFacade ready, starting sync in background', { environment, networkId: effectiveConfig.networkId }, Date.now() - t0);
 
   // Emit initial zero-progress state so popup renders immediately

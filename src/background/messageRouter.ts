@@ -157,10 +157,11 @@ export function setupMessageRouter(): void {
     return false;
   });
 
-  // Keepalive alarm
+  // Keepalive alarm — must do async work to extend SW lifetime
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'gsd-keepalive') {
-      // No-op
+      // Touch session storage to prove the SW is alive and reset idle timer
+      chrome.storage.session.set({ gsdKeepalive: Date.now() });
     }
   });
 
