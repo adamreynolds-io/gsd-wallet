@@ -110,11 +110,23 @@ export function setupMessageRouter(): void {
     }
   }, 60_000);
 
+  async function isDisclaimerAccepted(): Promise<boolean> {
+    const result = await chrome.storage.local.get('gsdDisclaimerAccepted');
+    return result['gsdDisclaimerAccepted'] === true;
+  }
+
   // Shared dApp request handler (used by both port and one-shot messages)
   async function handleDappRequest(
     payload: Record<string, unknown>,
     origin: string,
   ): Promise<unknown> {
+    if (!(await isDisclaimerAccepted())) {
+      return {
+        type: 'GSD_ERROR',
+        error: { code: 'NotReady', reason: 'Wallet disclaimer has not been accepted. Open the wallet popup first.' },
+      };
+    }
+
     if (payload['type'] === 'GSD_CONNECT') {
       const sessionId = crypto.randomUUID();
       sessions.set(sessionId, {

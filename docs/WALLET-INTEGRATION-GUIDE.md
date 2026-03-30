@@ -229,14 +229,49 @@ Without `wasm-unsafe-eval`, the ledger WASM module will fail to instantiate with
 
 #### Service worker keepalive
 
-Chrome terminates idle service workers after ~30 seconds. The wallet needs to stay alive during sync:
+Chrome terminates idle service workers after ~30 seconds. WebSocket connections (used by `@polkadot/api` for node/indexer communication) do NOT count as activity — Chrome will kill the SW even with active WebSockets.
+
+**Alarms alone are insufficient.** Chrome's minimum alarm period is 30 seconds, and the alarm handler runs too fast to extend the SW lifetime meaningfully.
+
+**Solution: Offscreen document with persistent port.** Create an offscreen document that holds a persistent port to the service worker. Chrome keeps the SW alive as long as a connected port exists:
 
 ```typescript
-chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.4 });
-chrome.alarms.onAlarm.addListener(() => { /* no-op */ });
+// offscreen.ts — persistent keepalive port
+function connectKeepalive() {
+  const port = chrome.runtime.connect({ name: 'gsd-keepalive' });
+  port.onDisconnect.addListener(() => {
+    // SW died — reconnect to force restart
+    setTimeout(connectKeepalive, 500);
+  });
+}
+connectKeepalive();
 ```
 
-Clear the alarm when the wallet is stopped.
+```typescript
+// messageRouter.ts — accept the keepalive port without broadcasting
+if (port.name === 'gsd-keepalive') {
+  return; // Just hold it open
+}
+```
+
+```typescript
+// walletManager.ts — create the offscreen document when wallet starts
+async function ensureOffscreenDocument(): Promise<void> {
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
+  });
+  if (contexts.length > 0) return;
+  await chrome.offscreen.createDocument({
+    url: 'src/offscreen/offscreen.html',
+    reasons: ['WORKERS' as chrome.offscreen.Reason],
+    justification: 'Keep service worker alive during wallet sync',
+  });
+}
+```
+
+Without this, mainnet sync (~87k shielded + ~87k dust events, ~6 minutes) will never complete — Chrome kills the SW every ~60 seconds and the SDK restarts from scratch each time.
+
+**Reference:** `gsd-wallet/src/offscreen/offscreen.ts`, `gsd-wallet/src/background/walletManager.ts:ensureOffscreenDocument`
 
 #### Popup height limit
 
@@ -260,6 +295,50 @@ for (const [tokenId, amount] of Object.entries(facadeState.unshielded.balances))
 // Popup → display
 const value = BigInt(balances[tokenId]);
 ```
+
+#### Live state updates via chrome.storage.onChanged
+
+Chrome MV3 port message delivery (`port.postMessage`) is unreliable for long-lived connections. Messages sent by the service worker may silently fail to reach the popup, especially after reconnections. **Do not rely on port broadcasts alone for live UI updates.**
+
+**Solution: Dual-channel updates.** The service worker writes state to `chrome.storage.session` on every update. The popup watches for changes via `chrome.storage.onChanged`:
+
+```typescript
+// Service worker — writes on every state change (already happening for caching)
+chrome.storage.session.set({ gsdLastState: serializedState });
+
+// Popup — watches for changes (bulletproof, no port dependency)
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'session') return;
+  if (changes['gsdLastState']?.newValue) {
+    store.setWalletState(changes['gsdLastState'].newValue);
+  }
+  if (changes['gsdDiagnosticEvents']?.newValue) {
+    store.addDiagnosticEventsBatch(changes['gsdDiagnosticEvents'].newValue);
+  }
+});
+```
+
+This works across all open popup/tab instances simultaneously and is immune to port lifecycle issues.
+
+**Reference:** `gsd-wallet/src/popup/hooks/useWalletState.ts`
+
+#### Disclaimer gate for DApp requests
+
+If your wallet includes a disclaimer or terms-of-use gate, ensure DApp API requests are also blocked — not just the popup UI. The service worker must independently check the disclaimer state before processing any DApp request:
+
+```typescript
+async function handleDappRequest(payload, origin) {
+  const result = await chrome.storage.local.get('gsdDisclaimerAccepted');
+  if (result['gsdDisclaimerAccepted'] !== true) {
+    return { type: 'GSD_ERROR', error: { code: 'NotReady', reason: 'Disclaimer not accepted' } };
+  }
+  // ... handle request
+}
+```
+
+Store the disclaimer acceptance in `chrome.storage.local` (persists across browser restarts), not `session`.
+
+**Reference:** `gsd-wallet/src/background/messageRouter.ts:isDisclaimerAccepted`, `gsd-wallet/src/popup/App.tsx:Disclaimer`
 
 ### Electron
 
@@ -571,9 +650,9 @@ walletManager ──emit()──→ diagnosticLogger ←──rehydrate()── 
                                 │                                                    │
                                 ├── in-memory buffer (2000 events, real-time)        │
                                 ├── chrome.storage.session (persists across SW kills) │
-                                └── port broadcast ──→ popup DiagnosticsPanel        │
+                                └── storage.onChanged ──→ popup DiagnosticsPanel     │
                                                           ├── filterable by level/category
-                                                          └── NDJSON export
+                                                          └── NDJSON export with ISO timestamps
 ```
 
 ### Event categories
@@ -606,6 +685,47 @@ When a stall is detected:
 - A `warn` level `sync` event is emitted with per-wallet progress data
 - The header badge shows "Stalled"
 
+### SDK console interception
+
+The `@polkadot/api` library logs critical events (WebSocket disconnects, RPC errors, reconnections) only to `console.warn/error`. In a service worker, these are invisible unless DevTools is open. Monkey-patch `console.warn` and `console.error` before any SDK imports to capture these as structured diagnostic events:
+
+```typescript
+// Must be called BEFORE setupMessageRouter() or any SDK imports
+const originalWarn = console.warn;
+console.warn = (...args: unknown[]) => {
+  originalWarn.apply(console, args);
+  const message = args.map(String).join(' ');
+  if (isSdkMessage(message)) {
+    emit('warn', 'sdk', message);
+  }
+};
+
+function isSdkMessage(msg: string): boolean {
+  return msg.includes('RPC-CORE') || msg.includes('disconnected from') ||
+    msg.includes('WebSocket') || msg.includes('@polkadot');
+}
+```
+
+This captures errors like `RPC-CORE: subscribeRuntimeVersion(): disconnected from wss://rpc.mainnet.midnight.network/: 1000:: Normal Closure` which are invisible in every other Midnight wallet.
+
+**Reference:** `gsd-wallet/src/background/sdkConsoleInterceptor.ts`
+
+### Diagnostic event flush timing
+
+Events are flushed to `chrome.storage.session` after 100ms or 3 accumulated events, whichever comes first. This provides near-instant delivery to the popup via `chrome.storage.onChanged` while batching writes to avoid overwhelming storage I/O.
+
+On service worker startup, `rehydrate()` restores persisted events from the previous lifecycle and continues the `nextId` counter so event IDs are monotonically increasing across restarts. Each lifecycle gets a unique `sessionId` (UUID) visible in the "Service worker started" event, so restarts are identifiable in the log.
+
+### Calculating overall sync percentage
+
+Do NOT average per-wallet percentages — this inflates the result because unshielded (374 events at 100%) gets equal weight to shielded (87k events at 40%). Instead, sum applied and highest across all wallets:
+
+```typescript
+const totalApplied = shielded.applied + unshielded.applied + dust.applied;
+const totalHighest = shielded.highest + unshielded.highest + dust.highest;
+const overallPercent = totalHighest > 0 ? Math.floor((totalApplied / totalHighest) * 100) : 0;
+```
+
 ### Why shielded/dust sync is slow
 
 The indexer streams **all** ZSwap (shielded) and dust events on the chain, not just those belonging to the wallet. This is a privacy design choice: if the indexer filtered by viewing keys, it would learn which addresses belong to the wallet, breaking the privacy model. The wallet receives all events and filters locally.
@@ -626,8 +746,12 @@ On mainnet with ~87k shielded and ~87k dust events, first sync takes several min
 | Address shows as empty string | `MidnightBech32m.encode()` threw (address not yet synced) | Wrap in try-catch, show placeholder |
 | UTXO hash "Not found in indexer" | `intentHash` is not a transaction hash | Don't use intent hash as indexer lookup key |
 | Popup scrolls past bottom | Chrome enforces viewport height limit (~600px) | Cap popup height; offer "Open in Full Tab" |
-| Service worker dies mid-operation | Chrome kills idle SWs after ~30s | Use `chrome.alarms` keepalive + persistent ports |
+| Service worker dies mid-sync | Chrome kills idle SWs after ~30s; WebSockets don't count as activity | Use offscreen document with persistent port (not alarms alone) |
+| Sync restarts from 0 on every SW restart | `InMemoryTransactionHistoryStorage` loses all state | Offscreen keepalive prevents kills; persistent SDK storage adapter is the long-term fix |
+| Popup shows stale data after close/reopen | Port message delivery unreliable in MV3 | Use `chrome.storage.onChanged` for live updates instead of port broadcasts |
+| Sync percentage inflated (61% shown, actual 43%) | Averaging per-wallet percentages equally | Use `totalApplied / totalHighest` across all wallets |
 | API call hangs after SW restart | `autoUnlock` reinitializes facade while API handler uses old ref | Gate API handlers with `waitForReady()` before using facade |
+| DApp connects before user accepts disclaimer | Popup gate doesn't block service worker DApp handler | Check disclaimer in both popup AND DApp request handler independently |
 | `balanceUnboundTransaction` hangs | Facade balance method blocks indefinitely for some contract txs | Under investigation — diagnostics panel helps trace the exact stall point |
 | `HDWallet.fromSeed` returns but wallet fails later | Didn't check `.type === 'seedOk'` | Always check tagged return types |
 | Facade created but never syncs | Forgot to call `facade.start()` after `init()` | `.init()` and `.start()` are separate steps |
