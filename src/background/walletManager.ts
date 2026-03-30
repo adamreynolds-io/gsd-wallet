@@ -22,6 +22,22 @@ import { NIGHT_TOKEN_ID } from '@shared/constants';
 import { getEnvironmentConfig } from '@shared/environments';
 import { emit } from './diagnosticLogger';
 
+async function ensureOffscreenDocument(): Promise<void> {
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
+  });
+  if (contexts.length > 0) return;
+  try {
+    await chrome.offscreen.createDocument({
+      url: 'src/offscreen/offscreen.html',
+      reasons: ['WORKERS' as chrome.offscreen.Reason],
+      justification: 'Keep service worker alive during wallet sync via periodic ping',
+    });
+  } catch {
+    // Already exists or not supported
+  }
+}
+
 export interface WalletSecretKeys {
   shieldedSecretKeys: ledger.ZswapSecretKeys;
   dustSecretKey: ledger.DustSecretKey;
@@ -471,6 +487,9 @@ async function initializeWalletCore(
   };
 
   chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.5 });
+
+  // Keep SW alive during sync by creating an offscreen document that pings us
+  ensureOffscreenDocument();
   emit('info', 'wallet', 'WalletFacade ready, starting sync in background', { environment, networkId: effectiveConfig.networkId }, Date.now() - t0);
 
   // Emit initial zero-progress state so popup renders immediately

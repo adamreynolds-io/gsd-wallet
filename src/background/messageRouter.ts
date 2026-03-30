@@ -36,6 +36,11 @@ export function setupMessageRouter(): void {
   });
 
   chrome.runtime.onConnect.addListener((port) => {
+    // Keepalive port from offscreen document — just hold it open
+    if (port.name === 'gsd-keepalive') {
+      return;
+    }
+
     // One-shot command ports (no broadcasts, just request/response)
     if (port.name === 'gsd-env-switch') {
       port.onMessage.addListener((msg: PopupRequest) => {
