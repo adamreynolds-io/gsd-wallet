@@ -16,6 +16,7 @@ import { emit, onEvent, getBacklog } from './diagnosticLogger';
 type SendResponse = (response: PopupResponse) => void;
 
 const connectedPorts: chrome.runtime.Port[] = [];
+const sessions = new Map<string, { origin: string; networkId: string; createdAt: number }>();
 
 function broadcastState(state: SerializedWalletState): void {
   const msg: PopupResponse = { type: 'STATE_UPDATE', state };
@@ -105,7 +106,6 @@ export function setupMessageRouter(): void {
 
   // Track connected dApp sessions with TTL
   const SESSION_TTL_MS = 30 * 60 * 1000;
-  const sessions = new Map<string, { origin: string; networkId: string; createdAt: number }>();
 
   setInterval(() => {
     const now = Date.now();
@@ -132,6 +132,7 @@ export function setupMessageRouter(): void {
     }
 
     if (payload['type'] === 'GSD_CONNECT') {
+      await walletManager.waitForReady();
       const sessionId = crypto.randomUUID();
       sessions.set(sessionId, {
         origin: origin ?? (payload['origin'] as string),
@@ -269,15 +270,23 @@ async function handlePopupMessage(
       }
 
       case 'SWITCH_ENVIRONMENT': {
+        // Invalidate all dApp sessions — they hold the old networkId
+        const sessionCount = sessions.size;
+        sessions.clear();
+        if (sessionCount > 0) {
+          emit('info', 'dapp', `Cleared ${sessionCount} dApp sessions on environment switch`);
+        }
+
         const seed = await stateManager.switchEnvironment(msg.environment);
         if (seed) {
           const swInfo = await stateManager.getActiveWalletInfo();
-          walletManager.initializeWallet(
-            seed, msg.environment, 0, swInfo?.name ?? '', msg.customUrls,
-          ).catch((err) => {
+          try {
+            await walletManager.initializeWallet(
+              seed, msg.environment, 0, swInfo?.name ?? '', msg.customUrls,
+            );
+          } catch (err) {
             send({ type: 'ERROR', error: err instanceof Error ? err.message : 'Failed to initialize wallet' });
-          });
-          // State updates will flow via broadcast once facade emits
+          }
         } else {
           // No wallet for this environment — tell popup to show import
           await walletManager.stopWallet();
