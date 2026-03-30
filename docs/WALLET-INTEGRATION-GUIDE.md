@@ -558,7 +558,65 @@ A wallet showing NIGHT=0 with contract tokens present is **correct behavior, not
 
 ---
 
-## 9. Common Failure Modes
+## 9. Diagnostic System
+
+Building a wallet on the Midnight SDK requires deep observability. The SDK uses `@polkadot/api` internally which logs critical events (WebSocket disconnects, RPC errors) only to `console.warn/error`. Service workers can be killed by Chrome at any time, losing all in-memory state. The diagnostic system addresses both problems.
+
+### Architecture
+
+```
+SDK (@polkadot/api) ──console.warn/error──→ sdkConsoleInterceptor ──emit()──→ diagnosticLogger
+                                                                                    │
+walletManager ──emit()──→ diagnosticLogger ←──rehydrate()── chrome.storage.session  │
+                                │                                                    │
+                                ├── in-memory buffer (2000 events, real-time)        │
+                                ├── chrome.storage.session (persists across SW kills) │
+                                └── port broadcast ──→ popup DiagnosticsPanel        │
+                                                          ├── filterable by level/category
+                                                          └── NDJSON export
+```
+
+### Event categories
+
+| Category | What it captures |
+|----------|-----------------|
+| `sw` | Service worker lifecycle (start, install, restart) |
+| `wallet` | Facade init, key derivation, start/stop, timing |
+| `state` | Sync status transitions (initializing → syncing → synced) |
+| `sync` | Per-wallet progress (applied/total every 2s), connection changes, phase transitions, stall detection |
+| `sdk` | Intercepted SDK console output (RPC-CORE disconnects, WebSocket errors, @polkadot internals) |
+| `dapp` | DApp connect/disconnect, API method calls |
+| `api` | DApp API handler results |
+| `tx` | Transaction phases (balance, sign, prove, submit) |
+| `indexer` | GraphQL queries |
+| `error` | Errors at any layer |
+
+### Persistence
+
+Events are persisted to `chrome.storage.session` via debounced writes (500ms or every 10 events). On SW startup, `rehydrate()` restores the buffer. This survives Chrome's aggressive SW lifecycle (kill after ~30s idle). Events are cleared when the browser closes, which is appropriate for diagnostic data.
+
+Each SW lifecycle gets a unique `sessionId` (UUID) — visible in the "Service worker started" event — so you can identify restarts in the event stream.
+
+### Stall detection
+
+An independent `setInterval` (10s) checks whether the combined applied count across all three wallets has advanced in the last 30 seconds. This runs outside the RxJS subscription, so it detects stalls even when the SDK's state observable stops emitting (e.g., after a WebSocket disconnect kills the underlying data stream).
+
+When a stall is detected:
+- `syncPhase` is set to `'stalled'` and broadcast to the popup
+- A `warn` level `sync` event is emitted with per-wallet progress data
+- The header badge shows "Stalled"
+
+### Why shielded/dust sync is slow
+
+The indexer streams **all** ZSwap (shielded) and dust events on the chain, not just those belonging to the wallet. This is a privacy design choice: if the indexer filtered by viewing keys, it would learn which addresses belong to the wallet, breaking the privacy model. The wallet receives all events and filters locally.
+
+Unshielded transactions are public and can be filtered server-side, so they sync instantly.
+
+On mainnet with ~87k shielded and ~87k dust events, first sync takes several minutes. Subsequent opens should restore from cached state and only sync the delta.
+
+---
+
+## 10. Common Failure Modes
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
@@ -578,7 +636,7 @@ A wallet showing NIGHT=0 with contract tokens present is **correct behavior, not
 
 ---
 
-## 10. Documentation Gap Analysis
+## 11. Documentation Gap Analysis
 
 What the existing Midnight documentation covers vs what you actually need:
 
@@ -603,7 +661,7 @@ What the existing Midnight documentation covers vs what you actually need:
 
 ---
 
-## 11. Reference Implementation
+## 12. Reference Implementation
 
 The GSD Wallet provides working implementations of every pattern in this guide:
 
@@ -613,10 +671,13 @@ The GSD Wallet provides working implementations of every pattern in this guide:
 | Facade initialization (two-phase) | `src/background/walletManager.ts` | `initializeWalletCore()` — Phase 1: subscribe + emit initial state; Phase 2: `facade.start()` in background |
 | SW race condition guard | `src/background/walletManager.ts` | `waitForReady()` |
 | State serialization | `src/background/walletManager.ts` | `serializeState()` |
-| Per-wallet sync progress | `src/popup/pages/Dashboard.tsx` | `MiniSyncBar` — three bars showing applied/total per wallet |
+| Per-wallet sync progress | `src/popup/pages/Dashboard.tsx` | `SyncDetailRow` — always-visible rows showing applied/total per wallet |
+| Sync stall detection | `src/background/walletManager.ts` | Independent timer detects 30s of no progress, broadcasts `stalled` phase |
 | Granular sync diagnostics | `src/background/walletManager.ts` | `sync:phase`, `sync:connected`, `sync:progress` events |
-| Diagnostic event logger | `src/background/diagnosticLogger.ts` | `emit()`, `getBacklog()`, `onEvent()` |
+| Persistent diagnostic logger | `src/background/diagnosticLogger.ts` | `emit()`, `rehydrate()` — 2000-event ring buffer persisted to `chrome.storage.session` |
+| SDK console interception | `src/background/sdkConsoleInterceptor.ts` | Captures `@polkadot/api` RPC-CORE errors and WebSocket disconnects |
 | Diagnostic event broadcasting | `src/background/messageRouter.ts` | `onEvent` → `DIAGNOSTIC_EVENT` to ports |
+| Log export | `src/popup/components/DiagnosticsPanel.tsx` | `downloadLogs()` — NDJSON export with ISO timestamps |
 | Message protocol types | `src/shared/messages.ts` | `PopupRequest`, `PopupResponse` |
 | DApp connector (inpage) | `src/content-script/inpage.ts` | Full file (120s timeout) |
 | Content script bridge | `src/content-script/content-script.ts` | Full file |
@@ -632,7 +693,7 @@ Repository: `https://github.com/adamreynolds-io/gsd-wallet`
 
 ---
 
-## 12. Audit Findings (GSD Wallet v0.1.0)
+## 13. Audit Findings (GSD Wallet v0.1.0)
 
 Code audit performed 2026-03-28 against wallet-sdk v3.0.0 documentation.
 
