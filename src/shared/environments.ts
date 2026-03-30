@@ -83,6 +83,10 @@ export function getEnvironmentConfig(
   return ENVIRONMENTS[environment];
 }
 
+export function getEnvironmentLabel(environment: Environment): string {
+  return ENVIRONMENT_OPTIONS.find((o) => o.value === environment)?.label ?? environment;
+}
+
 const EXPLORER_URLS: Partial<Record<Environment, string>> = {
   mainnet: 'https://explorer.mainnet.midnight.network',
   preprod: 'https://explorer.preprod.midnight.network',

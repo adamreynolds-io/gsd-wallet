@@ -47,10 +47,16 @@ export function useWalletConnection(): void {
       },
     );
 
-    // Read stored environment so the UI shows the correct network before state arrives
-    chrome.storage.session.get('gsdEnvironment').then((result) => {
-      if (result['gsdEnvironment']) {
-        usePopupStore.getState().setEnvironment(result['gsdEnvironment']);
+    // Read cached state so the UI shows correct network + last known state immediately
+    chrome.storage.session.get(['gsdEnvironment', 'gsdLastState']).then((result) => {
+      const store = usePopupStore.getState();
+      if (result['gsdLastState'] && !store.walletState) {
+        store.setWalletState(result['gsdLastState']);
+        if (store.hasVault === null) {
+          store.setHasVault(true);
+        }
+      } else if (result['gsdEnvironment']) {
+        store.setEnvironment(result['gsdEnvironment']);
       }
     });
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePopupStore } from '@popup/store/popupStore';
-import { ENVIRONMENT_OPTIONS } from '@shared/environments';
+import { ENVIRONMENT_OPTIONS, getEnvironmentLabel } from '@shared/environments';
 import type { Environment, SerializedWalletState } from '@shared/types';
 
 const LOCALNET_WALLETS = [0, 1, 2, 3];
@@ -202,25 +202,42 @@ function ExpandIcon() {
   );
 }
 
-const PHASE_BADGE: Record<string, { label: string; color: string }> = {
-  connecting: { label: 'Connecting', color: 'text-amber-400' },
-  'catching-up': { label: 'Syncing', color: 'text-blue-400' },
-  'nearly-synced': { label: 'Almost synced', color: 'text-cyan-400' },
-  synced: { label: 'Synced', color: 'text-green-400' },
-  stalled: { label: 'Stalled', color: 'text-red-400' },
+const PHASE_COLORS: Record<string, string> = {
+  connecting: 'text-amber-400',
+  'catching-up': 'text-blue-400',
+  'nearly-synced': 'text-cyan-400',
+  synced: 'text-green-400',
+  stalled: 'text-red-400',
 };
 
 function SyncStatusBadge({ walletState }: { walletState: SerializedWalletState | null }) {
   if (!walletState) return null;
   const phase = walletState.syncPhase;
-  const badge = PHASE_BADGE[phase];
-  if (!badge) return null;
-  const showPercent = phase === 'catching-up' || phase === 'nearly-synced' || phase === 'stalled';
-  return (
-    <span className={`text-xs ${badge.color}`}>
-      {badge.label}{showPercent ? ` ${walletState.overallSyncPercent}%` : ''}
-    </span>
-  );
+  const color = PHASE_COLORS[phase] ?? 'text-gray-400';
+  const networkName = getEnvironmentLabel(walletState.environment);
+
+  let text: string;
+  switch (phase) {
+    case 'connecting':
+      text = `Connecting to ${networkName}...`;
+      break;
+    case 'catching-up':
+      text = `Synchronising with ${networkName} ${walletState.overallSyncPercent}%`;
+      break;
+    case 'nearly-synced':
+      text = `Almost synced with ${networkName}`;
+      break;
+    case 'stalled':
+      text = `Sync with ${networkName} stalled`;
+      break;
+    case 'synced':
+      text = `Synced with ${networkName}`;
+      break;
+    default:
+      text = networkName;
+  }
+
+  return <span className={`text-xs ${color}`}>{text}</span>;
 }
 
 function SettingsIcon() {
