@@ -69,6 +69,7 @@ export interface SerializedUtxo {
 export interface SyncProgress {
   applied: number;
   highest: number;
+  highestIndex: number;
   connected: boolean;
 }
 
@@ -98,6 +99,7 @@ export interface SerializedWalletState {
   };
   overallSyncPercent: number;
   isSynced: boolean;
+  syncPhase: 'connecting' | 'catching-up' | 'nearly-synced' | 'synced';
   connections: {
     node: boolean;
     indexer: boolean;
@@ -143,6 +145,7 @@ export type DiagnosticCategory =
   | 'sw'
   | 'wallet'
   | 'state'
+  | 'sync'
   | 'dapp'
   | 'api'
   | 'popup'
@@ -154,7 +157,7 @@ export type DiagnosticCategory =
 export const DIAGNOSTIC_LEVELS: readonly DiagnosticLevel[] = ['debug', 'info', 'warn', 'error'];
 
 export const DIAGNOSTIC_CATEGORIES: readonly DiagnosticCategory[] = [
-  'sw', 'wallet', 'state', 'dapp', 'api', 'popup', 'tx', 'indexer', 'storage', 'error',
+  'sw', 'wallet', 'state', 'sync', 'dapp', 'api', 'popup', 'tx', 'indexer', 'storage', 'error',
 ];
 
 export interface DiagnosticEvent {

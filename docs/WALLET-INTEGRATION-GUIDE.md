@@ -149,15 +149,9 @@ const facade = await WalletFacade.init({
 });
 ```
 
-### Step 4: Start the facade (SEPARATE STEP)
+### Step 4: Subscribe to state BEFORE starting
 
-```typescript
-await facade.start(shieldedSecretKeys, dustSecretKey);
-```
-
-**Trap:** `WalletFacade.init()` does NOT start the wallet. You MUST call `.start()` separately. Missing this = wallet never syncs, no state updates, no errors — just silence.
-
-### Step 5: Subscribe to state
+Subscribe to the state observable immediately after `init()`, before calling `start()`. This ensures you receive every state update from the moment the facade connects.
 
 ```typescript
 facade.state().subscribe((facadeState) => {
@@ -166,7 +160,20 @@ facade.state().subscribe((facadeState) => {
 });
 ```
 
-**Reference:** `gsd-wallet/src/background/walletManager.ts:initializeWallet`
+### Step 5: Start the facade (NON-BLOCKING)
+
+```typescript
+// Do NOT await — let sync happen in the background
+facade.start(shieldedSecretKeys, dustSecretKey)
+  .then(() => { /* facade connected and syncing */ })
+  .catch((err) => { /* connection failed — handle gracefully */ });
+```
+
+**Trap:** `WalletFacade.init()` does NOT start the wallet. You MUST call `.start()` separately. Missing this = wallet never syncs, no state updates, no errors — just silence.
+
+**Performance trap:** If you `await facade.start()` before subscribing to state, the UI blocks for the entire connection + sync duration. Subscribe first, then start without awaiting. The state observable will emit updates as each wallet connects and syncs.
+
+**Reference:** `gsd-wallet/src/background/walletManager.ts:initializeWalletCore`
 
 ---
 
@@ -287,13 +294,27 @@ The facade emits a `FacadeState` object via its RxJS observable. This object is 
 
 ### Sync progress — different shapes per subsystem
 
-| Subsystem | Applied field | Highest field | Connected field |
-|-----------|--------------|---------------|-----------------|
-| Shielded | `appliedIndex` | `highestRelevantWalletIndex` | `isConnected` |
-| Unshielded | `appliedId` | `highestTransactionId` | `isConnected` |
-| Dust | `appliedIndex` | `highestRelevantWalletIndex` | `isConnected` |
+| Subsystem | Applied field | Highest relevant field | Chain tip field | Connected field |
+|-----------|--------------|----------------------|-----------------|-----------------|
+| Shielded | `appliedIndex` | `highestRelevantWalletIndex` | `highestIndex` | `isConnected` |
+| Unshielded | `appliedId` | `highestTransactionId` | — | `isConnected` |
+| Dust | `appliedIndex` | `highestRelevantWalletIndex` | `highestIndex` | `isConnected` |
+
+All fields are `bigint`. Shielded and dust also expose `highestIndex` (the global chain tip) and `highestRelevantIndex`.
 
 **Trap:** `highestRelevantWalletIndex === 0` does NOT mean "synced at block 0". It means the indexer hasn't determined the highest relevant index yet. You must also check `highestIndex` (the global chain tip) to distinguish "nothing relevant yet" from "not connected yet".
+
+### Displaying sync progress
+
+Show per-wallet progress bars with `applied / highest` event counts. This gives users concrete visibility into how far each wallet has synced:
+
+```
+S [======--] 45k/87k   U [========] 0/0   D [==------] 14k/87k
+```
+
+Calculate percentage as `(applied / highest) * 100`. When `highest === 0` and `isConnected`, treat as 100% (no relevant events). When `!isConnected`, show a gray/disconnected state.
+
+**Reference:** `gsd-wallet/src/popup/pages/Dashboard.tsx:MiniSyncBar`
 
 ### UTXO intent hash is NOT a transaction hash
 
@@ -541,7 +562,7 @@ A wallet showing NIGHT=0 with contract tokens present is **correct behavior, not
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Wallet hangs on "Initializing" | `WalletFacade.init()` is waiting for node WebSocket connection | Respond to UI immediately after storing the wallet; run facade init in background |
+| Wallet hangs on "Initializing" | `facade.start()` blocks until connected | Subscribe to state before calling `start()`; don't await `start()` — let it run in background. Emit an initial zero-progress state so UI renders immediately |
 | State updates continue after clearing wallet | Old facade RxJS subscription still emitting | Guard state handler: ignore updates when `hasVault === false` |
 | `TypeError: Do not know how to serialize a BigInt` | BigInt passed through `postMessage` or `JSON.stringify` | Convert to string at every IPC boundary |
 | Address shows as empty string | `MidnightBech32m.encode()` threw (address not yet synced) | Wrap in try-catch, show placeholder |
@@ -589,9 +610,11 @@ The GSD Wallet provides working implementations of every pattern in this guide:
 | Pattern | File | Key function/section |
 |---------|------|---------------------|
 | Service worker polyfills | `src/background/index.ts` | Lines 1-38 |
-| Facade initialization | `src/background/walletManager.ts` | `initializeWallet()` |
+| Facade initialization (two-phase) | `src/background/walletManager.ts` | `initializeWalletCore()` — Phase 1: subscribe + emit initial state; Phase 2: `facade.start()` in background |
 | SW race condition guard | `src/background/walletManager.ts` | `waitForReady()` |
 | State serialization | `src/background/walletManager.ts` | `serializeState()` |
+| Per-wallet sync progress | `src/popup/pages/Dashboard.tsx` | `MiniSyncBar` — three bars showing applied/total per wallet |
+| Granular sync diagnostics | `src/background/walletManager.ts` | `sync:phase`, `sync:connected`, `sync:progress` events |
 | Diagnostic event logger | `src/background/diagnosticLogger.ts` | `emit()`, `getBacklog()`, `onEvent()` |
 | Diagnostic event broadcasting | `src/background/messageRouter.ts` | `onEvent` → `DIAGNOSTIC_EVENT` to ports |
 | Message protocol types | `src/shared/messages.ts` | `PopupRequest`, `PopupResponse` |
@@ -618,7 +641,7 @@ Code audit performed 2026-03-28 against wallet-sdk v3.0.0 documentation.
 | Area | Status |
 |------|--------|
 | HD key derivation (tagged union checks, memory cleanup) | Correct |
-| WalletFacade two-step init (init + start) | Correct |
+| WalletFacade two-phase init (init → subscribe → start in background) | Correct |
 | State serialization (BigInt, address encoding, sync progress) | Correct |
 | Balance map iteration (all token types, not just NIGHT) | Correct |
 | DApp connector API (17 methods, BigInt serialization, session TTL) | Correct |

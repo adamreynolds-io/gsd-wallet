@@ -36,6 +36,16 @@ export function setupMessageRouter(): void {
   });
 
   chrome.runtime.onConnect.addListener((port) => {
+    // One-shot command ports (no broadcasts, just request/response)
+    if (port.name === 'gsd-env-switch') {
+      port.onMessage.addListener((msg: PopupRequest) => {
+        handlePopupMessage(msg, (response) => {
+          try { port.postMessage(response); } catch { /* */ }
+        });
+      });
+      return;
+    }
+
     if (port.name === 'gsd-popup') {
       connectedPorts.push(port);
 
@@ -240,9 +250,12 @@ async function handlePopupMessage(
         const seed = await stateManager.switchEnvironment(msg.environment);
         if (seed) {
           const swInfo = await stateManager.getActiveWalletInfo();
-          await walletManager.initializeWallet(
+          walletManager.initializeWallet(
             seed, msg.environment, 0, swInfo?.name ?? '', msg.customUrls,
-          );
+          ).catch((err) => {
+            send({ type: 'ERROR', error: err instanceof Error ? err.message : 'Failed to initialize wallet' });
+          });
+          // State updates will flow via broadcast once facade emits
         } else {
           // No wallet for this environment — tell popup to show import
           await walletManager.stopWallet();

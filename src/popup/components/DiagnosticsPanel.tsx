@@ -25,6 +25,7 @@ const CATEGORY_COLORS: Record<DiagnosticCategory, string> = {
   sw: 'text-gray-400',
   wallet: 'text-green-400',
   state: 'text-cyan-400',
+  sync: 'text-emerald-400',
   dapp: 'text-purple-400',
   api: 'text-blue-400',
   popup: 'text-indigo-400',
@@ -46,15 +47,16 @@ const LEVEL_TOOLTIPS: Record<DiagnosticLevel, string> = {
 };
 
 const CATEGORY_SHORT: Record<DiagnosticCategory, string> = {
-  sw: 'SW', wallet: 'Wal', state: 'Sta', dapp: 'DApp',
-  api: 'API', popup: 'Pop', tx: 'Tx', indexer: 'Idx',
-  storage: 'Sto', error: 'Err',
+  sw: 'SW', wallet: 'Wal', state: 'Sta', sync: 'Sync',
+  dapp: 'DApp', api: 'API', popup: 'Pop', tx: 'Tx',
+  indexer: 'Idx', storage: 'Sto', error: 'Err',
 };
 
 const CATEGORY_TOOLTIPS: Record<DiagnosticCategory, string> = {
   sw: 'Service worker lifecycle',
   wallet: 'Wallet init, keys, facade',
   state: 'Sync status transitions',
+  sync: 'Per-wallet sync progress, connections, phase transitions',
   dapp: 'DApp connect/disconnect',
   api: 'DApp API method calls',
   popup: 'Popup message handling',

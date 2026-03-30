@@ -37,6 +37,7 @@ interface ActiveWallet {
   walletName: string;
   subscription: { unsubscribe(): void };
   latestState: FacadeState | null;
+  startPromise: Promise<void> | null;
 }
 
 let activeWallet: ActiveWallet | null = null;
@@ -178,6 +179,7 @@ function serializeState(
       progress: {
         applied: Number(sp.appliedIndex),
         highest: Number(sp.highestRelevantWalletIndex),
+        highestIndex: Number(sp.highestIndex),
         connected: sp.isConnected,
       },
     },
@@ -189,6 +191,7 @@ function serializeState(
       progress: {
         applied: Number(up.appliedId),
         highest: Number(up.highestTransactionId),
+        highestIndex: Number(up.highestTransactionId),
         connected: up.isConnected,
       },
     },
@@ -199,11 +202,19 @@ function serializeState(
       progress: {
         applied: Number(dp.appliedIndex),
         highest: Number(dp.highestRelevantWalletIndex),
+        highestIndex: Number(dp.highestIndex),
         connected: dp.isConnected,
       },
     },
     overallSyncPercent,
     isSynced: reallySynced,
+    syncPhase: reallySynced
+      ? 'synced' as const
+      : !allConnected
+        ? 'connecting' as const
+        : overallSyncPercent >= 90
+          ? 'nearly-synced' as const
+          : 'catching-up' as const,
     connections: {
       node: up.isConnected,
       indexer: sp.isConnected,
@@ -317,12 +328,13 @@ async function initializeWalletCore(
   });
   emit('info', 'wallet', 'WalletFacade.init complete', undefined, Date.now() - facadeT0);
 
-  emit('info', 'wallet', 'Starting facade (connecting to indexer/node)');
-  const startT0 = Date.now();
-  await facade.start(shieldedSecretKeys, dustSecretKey);
-  emit('info', 'wallet', 'facade.start complete', undefined, Date.now() - startT0);
+  // --- Phase 1: Subscribe + set activeWallet (fast, unblocks UI) ---
 
   let lastStatus = '';
+  let lastPhase = '';
+  let lastProgressEmit = 0;
+  const prevConnections = { shielded: false, unshielded: false, dust: false };
+
   const sub = facade.state().subscribe((facadeState) => {
     if (activeWallet) {
       activeWallet.latestState = facadeState;
@@ -333,7 +345,7 @@ async function initializeWalletCore(
       accountIndex,
     );
 
-    // Emit on status transitions only
+    // Emit on status transitions
     if (serialized.status !== lastStatus) {
       emit('info', 'state', `Status: ${lastStatus || '(none)'} -> ${serialized.status}`, {
         shielded: serialized.shielded.progress,
@@ -342,6 +354,41 @@ async function initializeWalletCore(
         syncPercent: serialized.overallSyncPercent,
       });
       lastStatus = serialized.status;
+    }
+
+    // Emit on sync phase transitions
+    if (serialized.syncPhase !== lastPhase) {
+      emit('info', 'sync', `Phase: ${lastPhase || '(none)'} -> ${serialized.syncPhase}`, {
+        shielded: serialized.shielded.syncPercent,
+        unshielded: serialized.unshielded.syncPercent,
+        dust: serialized.dust.syncPercent,
+      });
+      lastPhase = serialized.syncPhase;
+    }
+
+    // Emit per-wallet connection changes
+    const conns = {
+      shielded: serialized.shielded.progress.connected,
+      unshielded: serialized.unshielded.progress.connected,
+      dust: serialized.dust.progress.connected,
+    };
+    for (const wallet of ['shielded', 'unshielded', 'dust'] as const) {
+      if (conns[wallet] !== prevConnections[wallet]) {
+        emit('info', 'sync', `${wallet}: ${conns[wallet] ? 'connected' : 'disconnected'}`);
+        prevConnections[wallet] = conns[wallet];
+      }
+    }
+
+    // Throttled progress events (every 2s)
+    const now = Date.now();
+    if (now - lastProgressEmit >= 2000) {
+      emit('debug', 'sync', 'Sync progress', {
+        shielded: `${serialized.shielded.progress.applied}/${serialized.shielded.progress.highest} (${serialized.shielded.syncPercent}%)`,
+        unshielded: `${serialized.unshielded.progress.applied}/${serialized.unshielded.progress.highest} (${serialized.unshielded.syncPercent}%)`,
+        dust: `${serialized.dust.progress.applied}/${serialized.dust.progress.highest} (${serialized.dust.syncPercent}%)`,
+        overall: serialized.overallSyncPercent,
+      });
+      lastProgressEmit = now;
     }
 
     chrome.storage.session.set({ gsdLastState: serialized });
@@ -360,10 +407,43 @@ async function initializeWalletCore(
     walletName,
     subscription: sub,
     latestState: null,
+    startPromise: null,
   };
 
   chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.4 });
-  emit('info', 'wallet', 'Wallet initialized', { environment, networkId: effectiveConfig.networkId }, Date.now() - t0);
+  emit('info', 'wallet', 'WalletFacade ready, starting sync in background', { environment, networkId: effectiveConfig.networkId }, Date.now() - t0);
+
+  // Emit initial zero-progress state so popup renders immediately
+  const initialState: SerializedWalletState = {
+    status: 'initializing',
+    environment,
+    activeAccountIndex: accountIndex,
+    shielded: { address: '', balances: {}, coinCount: 0, syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+    unshielded: { address: '', balances: {}, utxos: [], syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+    dust: { address: '', balance: '0', syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+    overallSyncPercent: 0,
+    isSynced: false,
+    syncPhase: 'connecting',
+    connections: { node: false, indexer: false, prover: false },
+    activeWalletName: walletName,
+  };
+  chrome.storage.session.set({ gsdLastState: initialState });
+  for (const listener of stateListeners) {
+    listener(initialState);
+  }
+
+  // --- Phase 2: Start facade in background (slow, non-blocking) ---
+
+  emit('info', 'wallet', 'Starting facade (connecting to indexer/node)');
+  const startT0 = Date.now();
+  const startPromise = facade.start(shieldedSecretKeys, dustSecretKey)
+    .then(() => {
+      emit('info', 'wallet', 'facade.start complete', undefined, Date.now() - startT0);
+    })
+    .catch((err) => {
+      emit('error', 'wallet', 'facade.start failed', { error: String(err) }, Date.now() - startT0);
+    });
+  activeWallet.startPromise = startPromise;
 }
 
 export async function stopWallet(): Promise<void> {

@@ -18,6 +18,9 @@ export function useWalletConnection(): void {
       if (msg.type === 'STATE_UPDATE') {
         const { hasVault } = usePopupStore.getState();
         if (hasVault !== false) {
+          if (hasVault === null) {
+            setHasVault(true);
+          }
           setWalletState(msg.state);
         }
       } else if (msg.type === 'DIAGNOSTIC_EVENT') {

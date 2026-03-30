@@ -35,13 +35,14 @@ export function Header() {
   }, [refreshWallets]);
 
   function handleNetworkSwitch(env: Environment) {
-    const port = chrome.runtime.connect({ name: 'gsd-popup' });
+    if (env === currentEnv) return;
+    const port = chrome.runtime.connect({ name: 'gsd-env-switch' });
     port.postMessage({ type: 'SWITCH_ENVIRONMENT', environment: env });
     port.onMessage.addListener((msg) => {
       if (msg.type === 'ERROR') {
+        port.disconnect();
         navigate('/onboarding');
       }
-      port.disconnect();
     });
   }
 
