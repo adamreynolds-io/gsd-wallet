@@ -21,6 +21,7 @@ function handleMessage(msg: PopupResponse): void {
 export function useWalletConnection(): void {
   const portRef = useRef<chrome.runtime.Port | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const unmounted = useRef(false);
 
   useEffect(() => {
@@ -37,6 +38,10 @@ export function useWalletConnection(): void {
 
       port.onDisconnect.addListener(() => {
         portRef.current = null;
+        if (pollTimer.current) {
+          clearInterval(pollTimer.current);
+          pollTimer.current = null;
+        }
         store.addDiagnosticEvent({
           id: Date.now(),
           timestamp: Date.now(),
@@ -68,6 +73,16 @@ export function useWalletConnection(): void {
 
       port.postMessage({ type: 'GET_STATE' });
       port.postMessage({ type: 'GET_DIAGNOSTIC_BACKLOG' });
+
+      // Poll for state every 2s as a fallback for broadcast delivery issues
+      if (pollTimer.current) clearInterval(pollTimer.current);
+      pollTimer.current = setInterval(() => {
+        try {
+          port.postMessage({ type: 'GET_STATE' });
+        } catch {
+          // Port dead — reconnect will handle it
+        }
+      }, 2000);
     }
 
     // Check if wallets exist
@@ -103,6 +118,9 @@ export function useWalletConnection(): void {
       unmounted.current = true;
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
+      }
+      if (pollTimer.current) {
+        clearInterval(pollTimer.current);
       }
       if (portRef.current) {
         portRef.current.disconnect();
