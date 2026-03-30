@@ -22,6 +22,7 @@ function handleMessage(msg: PopupResponse): void {
 export function useWalletConnection(): void {
   const portRef = useRef<chrome.runtime.Port | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectDelay = useRef(0);
   const unmounted = useRef(false);
 
   useEffect(() => {
@@ -38,27 +39,24 @@ export function useWalletConnection(): void {
 
       port.onDisconnect.addListener(() => {
         portRef.current = null;
-        store.addDiagnosticEvent({
-          id: Date.now(),
-          timestamp: Date.now(),
-          level: 'warn',
-          category: 'popup',
-          message: 'Port disconnected from service worker',
-        });
-        // Auto-reconnect immediately unless unmounted
         if (!unmounted.current) {
+          // Exponential backoff: 500ms, 1s, 2s, 4s, cap at 5s
+          reconnectDelay.current = reconnectDelay.current === 0
+            ? 500
+            : Math.min(reconnectDelay.current * 2, 5000);
           store.addDiagnosticEvent({
             id: Date.now(),
             timestamp: Date.now(),
-            level: 'info',
+            level: 'warn',
             category: 'popup',
-            message: 'Reconnecting to service worker...',
+            message: `Port disconnected, reconnecting in ${reconnectDelay.current}ms`,
           });
-          // Reconnect on next tick — keeps the SW alive by maintaining a port
-          reconnectTimer.current = setTimeout(connect, 0);
+          reconnectTimer.current = setTimeout(connect, reconnectDelay.current);
         }
       });
 
+      // Reset backoff on successful connection
+      reconnectDelay.current = 0;
       store.addDiagnosticEvent({
         id: Date.now(),
         timestamp: Date.now(),

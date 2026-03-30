@@ -72,7 +72,7 @@ The wallet syncs three subsystems independently:
 
 **First sync is slow on mainnet** (~87k shielded + ~87k dust events). The unshielded subsystem syncs instantly because it only streams your transactions.
 
-**Persistent SDK storage** ensures sync survives Chrome's service worker lifecycle. The wallet serializes SDK state to IndexedDB every 30 seconds during sync. When Chrome kills the service worker (after ~30s idle), the next restart restores from the last checkpoint and continues syncing — no progress is lost. Full mainnet sync completes across multiple SW restarts without the user needing to keep the popup open.
+**Persistent SDK storage** ensures sync survives Chrome's service worker lifecycle. The wallet serializes SDK state to IndexedDB every 10 seconds during sync. When Chrome kills the service worker (after ~30s idle), the next restart restores from the last checkpoint and continues syncing — no progress is lost. Full mainnet sync completes across multiple SW restarts without the user needing to keep the popup open.
 
 The two-phase initialization ensures the UI is never blocked:
 1. **Phase 1 (fast):** Load checkpoint from IndexedDB (if available), create facade with restored or fresh state, subscribe to state, emit initial state to UI

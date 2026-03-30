@@ -445,7 +445,8 @@ async function initializeWalletCore(
   let stallWarned = false;
   let lastCheckpointTime = 0;
   let wasSynced = false;
-  const CHECKPOINT_INTERVAL_MS = 30_000;
+  // 11s avoids alignment with Chrome's 60s SW kill boundary
+  const CHECKPOINT_INTERVAL_MS = 11_000;
   const prevConnections = { shielded: false, unshielded: false, dust: false };
 
   const sub = facade.state().subscribe((facadeState) => {
