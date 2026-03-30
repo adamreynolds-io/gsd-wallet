@@ -3,6 +3,7 @@ import type { SerializedWalletState } from '@shared/types';
 import { executeTransfer } from '@core/transfer';
 import { executeDustRegistration } from '@core/dustRegistration';
 import { executeDustDeregistration } from '@core/dustDeregistration';
+import { getCachedUpdate } from './updateChecker';
 import {
   addTxHistoryEntry,
   getTxHistory,
@@ -79,6 +80,18 @@ export function setupMessageRouter(): void {
         port.postMessage({
           type: 'STATE_UPDATE',
           state: currentState,
+        } satisfies PopupResponse);
+      }
+
+      // Notify popup if an update is available
+      const update = getCachedUpdate();
+      if (update?.updateAvailable) {
+        port.postMessage({
+          type: 'UPDATE_AVAILABLE',
+          currentVersion: update.currentVersion,
+          latestVersion: update.latestVersion,
+          releaseUrl: update.releaseUrl,
+          downloadUrl: update.downloadUrl,
         } satisfies PopupResponse);
       }
     } else if (port.name === 'gsd-dapp') {

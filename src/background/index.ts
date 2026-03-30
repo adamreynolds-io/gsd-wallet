@@ -40,6 +40,7 @@ if (typeof window === 'undefined') {
 import { interceptSdkConsole } from './sdkConsoleInterceptor';
 import { emit, rehydrate, sessionId } from './diagnosticLogger';
 import { setupMessageRouter } from './messageRouter';
+import { startUpdateChecker } from './updateChecker';
 
 // Intercept SDK console output before any SDK imports
 interceptSdkConsole();
@@ -50,6 +51,7 @@ rehydrate().then(() => {
   setupMessageRouter();
 
   emit('info', 'sw', 'Service worker started', { sessionId });
+  startUpdateChecker();
 }).catch((err) => {
   // If rehydrate fails, still start the router
   setupMessageRouter();
