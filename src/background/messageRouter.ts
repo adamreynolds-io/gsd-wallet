@@ -7,6 +7,7 @@ import { addTxHistoryEntry, getTxHistory } from '@shared/storage';
 import { handleApiCall } from './connectedApiHandler';
 import * as stateManager from './stateManager';
 import * as walletManager from './walletManager';
+import { emit, onEvent, getBacklog } from './diagnosticLogger';
 
 type SendResponse = (response: PopupResponse) => void;
 
@@ -26,7 +27,25 @@ function broadcastState(state: SerializedWalletState): void {
 export function setupMessageRouter(): void {
   walletManager.onStateChange(broadcastState);
 
+  // Broadcast diagnostic events to all connected popup ports
+  onEvent((event) => {
+    const msg: PopupResponse = { type: 'DIAGNOSTIC_EVENT', event };
+    for (const port of connectedPorts) {
+      try { port.postMessage(msg); } catch { /* */ }
+    }
+  });
+
   chrome.runtime.onConnect.addListener((port) => {
+    // One-shot command ports (no broadcasts, just request/response)
+    if (port.name === 'gsd-env-switch') {
+      port.onMessage.addListener((msg: PopupRequest) => {
+        handlePopupMessage(msg, (response) => {
+          try { port.postMessage(response); } catch { /* */ }
+        });
+      });
+      return;
+    }
+
     if (port.name === 'gsd-popup') {
       connectedPorts.push(port);
 
@@ -53,21 +72,20 @@ export function setupMessageRouter(): void {
         } satisfies PopupResponse);
       }
     } else if (port.name === 'gsd-dapp') {
-      // Persistent port for dApp connector (survives long proving operations)
       port.onMessage.addListener((msg) => {
         if (msg.type !== 'DAPP_REQUEST') return;
         const { requestId, payload, origin } = msg;
-        console.log(`[GSD] dApp port request: ${payload?.['type']} ${payload?.['method'] ?? ''}`);
+        emit('info', 'dapp', `dApp request: ${payload?.['type']} ${payload?.['method'] ?? ''}`, { requestId, type: payload?.['type'], method: payload?.['method'], origin });
 
         handleDappRequest(payload, origin).then((response) => {
-          console.log(`[GSD] dApp port response for ${requestId}: ${(response as Record<string, unknown>)?.['type']}`);
+          emit('debug', 'dapp', `dApp response: ${requestId}`, { requestId, responseType: (response as Record<string, unknown>)?.['type'] });
           try {
             port.postMessage({ requestId, payload: response });
           } catch (e) {
-            console.error('[GSD] Failed to send dApp response:', e);
+            emit('error', 'dapp', `Failed to send dApp response`, { requestId, error: String(e) });
           }
         }).catch((e) => {
-          console.error('[GSD] dApp request handler error:', e);
+          emit('error', 'error', `dApp request handler error`, { requestId, error: String(e) });
           try {
             port.postMessage({ requestId, payload: { type: 'GSD_ERROR', error: { code: 'InternalError', reason: String(e) } } });
           } catch { /* */ }
@@ -99,7 +117,7 @@ export function setupMessageRouter(): void {
         networkId: payload['networkId'] as string,
         createdAt: Date.now(),
       });
-      console.log(`[GSD] dApp connected: ${origin} (session ${sessionId})`);
+      emit('info', 'dapp', `dApp connected: ${origin}`, { sessionId, networkId: payload['networkId'], origin });
       return { type: 'GSD_RESPONSE', result: sessionId };
     }
 
@@ -147,17 +165,22 @@ export function setupMessageRouter(): void {
   });
 
   // Auto-unlock on SW start if wallets exist
+  emit('info', 'wallet', 'Auto-unlock: checking for existing wallets');
   stateManager.autoUnlock().then(async (unlocked) => {
     if (unlocked) {
       const info = await stateManager.getActiveWalletInfo();
       const seed = stateManager.getSeed();
       if (info && seed) {
         try {
+          emit('info', 'wallet', 'Auto-unlock: initializing wallet', { environment: info.environment, name: info.name });
           await walletManager.initializeWallet(seed, info.environment, 0, info.name);
+          emit('info', 'wallet', 'Auto-unlock: wallet ready');
         } catch (err) {
-          console.error('[GSD] Auto-init failed:', err);
+          emit('error', 'wallet', 'Auto-unlock failed', { error: String(err) });
         }
       }
+    } else {
+      emit('debug', 'wallet', 'Auto-unlock: no wallets found');
     }
   });
 }
@@ -227,9 +250,12 @@ async function handlePopupMessage(
         const seed = await stateManager.switchEnvironment(msg.environment);
         if (seed) {
           const swInfo = await stateManager.getActiveWalletInfo();
-          await walletManager.initializeWallet(
+          walletManager.initializeWallet(
             seed, msg.environment, 0, swInfo?.name ?? '', msg.customUrls,
-          );
+          ).catch((err) => {
+            send({ type: 'ERROR', error: err instanceof Error ? err.message : 'Failed to initialize wallet' });
+          });
+          // State updates will flow via broadcast once facade emits
         } else {
           // No wallet for this environment — tell popup to show import
           await walletManager.stopWallet();
@@ -253,6 +279,11 @@ async function handlePopupMessage(
       case 'GET_TX_HISTORY': {
         const entries = await getTxHistory(0, 0, 50);
         send({ type: 'TX_HISTORY', entries });
+        break;
+      }
+
+      case 'GET_DIAGNOSTIC_BACKLOG': {
+        send({ type: 'DIAGNOSTIC_EVENTS_BATCH', events: getBacklog() });
         break;
       }
 

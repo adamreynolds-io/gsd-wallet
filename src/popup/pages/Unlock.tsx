@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { usePopupStore } from '@popup/store/popupStore';
 
 /**
- * Auto-unlock page. Since we dropped password protection for non-mainnet,
- * this just shows a loading spinner while the SW auto-initializes.
+ * Auto-unlock page. Immediately redirects to Dashboard.
+ * The wallet initializes in the background — the Dashboard
+ * renders an empty wallet view while sync progress shows in
+ * the status bar and progress indicators.
  */
 export function Unlock() {
   const navigate = useNavigate();
@@ -12,17 +14,12 @@ export function Unlock() {
   const walletState = usePopupStore((s) => s.walletState);
 
   useEffect(() => {
-    // The SW auto-unlocks on start. Just wait for state.
     if (walletState) {
       setStatus(walletState.status);
-      navigate('/dashboard');
     }
+    // Always go to dashboard — it handles uninitialized state gracefully
+    navigate('/dashboard', { replace: true });
   }, [walletState, navigate, setStatus]);
 
-  return (
-    <div className="flex flex-col items-center justify-center h-full">
-      <div className="w-8 h-8 border-4 border-accent-purple border-t-transparent rounded-full animate-spin" />
-      <p className="text-sm text-gray-400 mt-3">Loading wallet...</p>
-    </div>
-  );
+  return null;
 }

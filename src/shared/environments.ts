@@ -8,8 +8,7 @@ export const ENVIRONMENT_OPTIONS: Array<{
   value: Environment;
 }> = [
   { label: 'Mainnet', value: 'mainnet' },
-  { label: 'Mainnet (VPN)', value: 'mainnet-vpn' },
-  { label: 'PreProd', value: 'preprod' },
+{ label: 'PreProd', value: 'preprod' },
   { label: 'Preview', value: 'preview' },
   { label: 'QANet', value: 'qanet' },
   { label: 'DevNet', value: 'dev' },
@@ -33,16 +32,7 @@ export const ENVIRONMENTS: Record<Environment, EnvironmentConfig> = {
     nodeWsUrl: 'wss://rpc.mainnet.midnight.network',
     provingServerUrl: PROVING_SERVER_URL,
   },
-  'mainnet-vpn': {
-    networkId: NetworkId.NetworkId.MainNet,
-    indexerHttpUrl:
-      'https://indexer.mainnet.midnight.network/api/v4/graphql',
-    indexerWsUrl:
-      'wss://indexer.mainnet.midnight.network/api/v4/graphql/ws',
-    nodeWsUrl: 'wss://td-rpc.mainnet.midnight.network',
-    provingServerUrl: PROVING_SERVER_URL,
-  },
-  preprod: {
+preprod: {
     networkId: NetworkId.NetworkId.PreProd,
     indexerHttpUrl:
       'https://indexer.preprod.midnight.network/api/v4/graphql',
@@ -95,7 +85,6 @@ export function getEnvironmentConfig(
 
 const EXPLORER_URLS: Partial<Record<Environment, string>> = {
   mainnet: 'https://explorer.mainnet.midnight.network',
-  'mainnet-vpn': 'https://explorer.mainnet.midnight.network',
   preprod: 'https://explorer.preprod.midnight.network',
   preview: 'https://explorer.preview.midnight.network',
   qanet: 'https://explorer.qanet.midnight.network',

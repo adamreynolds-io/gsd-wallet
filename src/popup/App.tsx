@@ -43,28 +43,17 @@ export function App() {
 }
 
 function RootRedirect({
-  status,
   hasVault,
 }: {
   status: string;
   hasVault: boolean | null;
 }) {
-  if (hasVault === null) {
-    // Still checking
-    return (
-      <div className="flex items-center justify-center h-full text-gray-400">
-        Loading...
-      </div>
-    );
-  }
-
-  if (!hasVault) {
+  // No vault confirmed — onboard
+  if (hasVault === false) {
     return <Navigate to="/onboarding" replace />;
   }
 
-  if (status === 'syncing' || status === 'synced') {
-    return <Navigate to="/dashboard" replace />;
-  }
-
-  return <Navigate to="/unlock" replace />;
+  // Vault exists or still checking — go straight to Dashboard.
+  // Dashboard renders the empty wallet view while waiting for state.
+  return <Navigate to="/dashboard" replace />;
 }

@@ -2,7 +2,6 @@ import type { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
 
 export type Environment =
   | 'mainnet'
-  | 'mainnet-vpn'
   | 'preprod'
   | 'preview'
   | 'qanet'
@@ -70,6 +69,7 @@ export interface SerializedUtxo {
 export interface SyncProgress {
   applied: number;
   highest: number;
+  highestIndex: number;
   connected: boolean;
 }
 
@@ -99,6 +99,7 @@ export interface SerializedWalletState {
   };
   overallSyncPercent: number;
   isSynced: boolean;
+  syncPhase: 'connecting' | 'catching-up' | 'nearly-synced' | 'synced';
   connections: {
     node: boolean;
     indexer: boolean;
@@ -135,3 +136,36 @@ export type InspectorTarget =
   | { kind: 'transaction'; hash: string }
   | { kind: 'block'; height: number }
   | { kind: 'contract'; address: string };
+
+// --- Diagnostics ---
+
+export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export type DiagnosticCategory =
+  | 'sw'
+  | 'wallet'
+  | 'state'
+  | 'sync'
+  | 'dapp'
+  | 'api'
+  | 'popup'
+  | 'tx'
+  | 'indexer'
+  | 'storage'
+  | 'error';
+
+export const DIAGNOSTIC_LEVELS: readonly DiagnosticLevel[] = ['debug', 'info', 'warn', 'error'];
+
+export const DIAGNOSTIC_CATEGORIES: readonly DiagnosticCategory[] = [
+  'sw', 'wallet', 'state', 'sync', 'dapp', 'api', 'popup', 'tx', 'indexer', 'storage', 'error',
+];
+
+export interface DiagnosticEvent {
+  id: number;
+  timestamp: number;
+  level: DiagnosticLevel;
+  category: DiagnosticCategory;
+  message: string;
+  data?: unknown;
+  elapsed?: number;
+}

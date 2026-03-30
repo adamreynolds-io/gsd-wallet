@@ -149,15 +149,9 @@ const facade = await WalletFacade.init({
 });
 ```
 
-### Step 4: Start the facade (SEPARATE STEP)
+### Step 4: Subscribe to state BEFORE starting
 
-```typescript
-await facade.start(shieldedSecretKeys, dustSecretKey);
-```
-
-**Trap:** `WalletFacade.init()` does NOT start the wallet. You MUST call `.start()` separately. Missing this = wallet never syncs, no state updates, no errors — just silence.
-
-### Step 5: Subscribe to state
+Subscribe to the state observable immediately after `init()`, before calling `start()`. This ensures you receive every state update from the moment the facade connects.
 
 ```typescript
 facade.state().subscribe((facadeState) => {
@@ -166,7 +160,20 @@ facade.state().subscribe((facadeState) => {
 });
 ```
 
-**Reference:** `gsd-wallet/src/background/walletManager.ts:initializeWallet`
+### Step 5: Start the facade (NON-BLOCKING)
+
+```typescript
+// Do NOT await — let sync happen in the background
+facade.start(shieldedSecretKeys, dustSecretKey)
+  .then(() => { /* facade connected and syncing */ })
+  .catch((err) => { /* connection failed — handle gracefully */ });
+```
+
+**Trap:** `WalletFacade.init()` does NOT start the wallet. You MUST call `.start()` separately. Missing this = wallet never syncs, no state updates, no errors — just silence.
+
+**Performance trap:** If you `await facade.start()` before subscribing to state, the UI blocks for the entire connection + sync duration. Subscribe first, then start without awaiting. The state observable will emit updates as each wallet connects and syncs.
+
+**Reference:** `gsd-wallet/src/background/walletManager.ts:initializeWalletCore`
 
 ---
 
@@ -225,7 +232,7 @@ Without `wasm-unsafe-eval`, the ledger WASM module will fail to instantiate with
 Chrome terminates idle service workers after ~30 seconds. The wallet needs to stay alive during sync:
 
 ```typescript
-chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
+chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.4 });
 chrome.alarms.onAlarm.addListener(() => { /* no-op */ });
 ```
 
@@ -287,13 +294,27 @@ The facade emits a `FacadeState` object via its RxJS observable. This object is 
 
 ### Sync progress — different shapes per subsystem
 
-| Subsystem | Applied field | Highest field | Connected field |
-|-----------|--------------|---------------|-----------------|
-| Shielded | `appliedIndex` | `highestRelevantWalletIndex` | `isConnected` |
-| Unshielded | `appliedId` | `highestTransactionId` | `isConnected` |
-| Dust | `appliedIndex` | `highestRelevantWalletIndex` | `isConnected` |
+| Subsystem | Applied field | Highest relevant field | Chain tip field | Connected field |
+|-----------|--------------|----------------------|-----------------|-----------------|
+| Shielded | `appliedIndex` | `highestRelevantWalletIndex` | `highestIndex` | `isConnected` |
+| Unshielded | `appliedId` | `highestTransactionId` | — | `isConnected` |
+| Dust | `appliedIndex` | `highestRelevantWalletIndex` | `highestIndex` | `isConnected` |
+
+All fields are `bigint`. Shielded and dust also expose `highestIndex` (the global chain tip) and `highestRelevantIndex`.
 
 **Trap:** `highestRelevantWalletIndex === 0` does NOT mean "synced at block 0". It means the indexer hasn't determined the highest relevant index yet. You must also check `highestIndex` (the global chain tip) to distinguish "nothing relevant yet" from "not connected yet".
+
+### Displaying sync progress
+
+Show per-wallet progress bars with `applied / highest` event counts. This gives users concrete visibility into how far each wallet has synced:
+
+```
+S [======--] 45k/87k   U [========] 0/0   D [==------] 14k/87k
+```
+
+Calculate percentage as `(applied / highest) * 100`. When `highest === 0` and `isConnected`, treat as 100% (no relevant events). When `!isConnected`, show a gray/disconnected state.
+
+**Reference:** `gsd-wallet/src/popup/pages/Dashboard.tsx:MiniSyncBar`
 
 ### UTXO intent hash is NOT a transaction hash
 
@@ -400,16 +421,30 @@ function deserializeBigInts(method: string, result: unknown): unknown {
 
 ### Request timeout
 
-Add a 30-second timeout on all inpage requests to prevent hung promises:
+Add a timeout on inpage requests to prevent hung promises. Proving-heavy operations (contract calls, transfers) take 15-30+ seconds, so the timeout must be long enough to accommodate proving and submission:
 
 ```typescript
+const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes — proving + submission can take 30+ seconds
 const timeout = setTimeout(() => {
   window.removeEventListener('message', handleResponse);
-  reject(new Error('Request timed out after 30s'));
-}, 30_000);
+  reject(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`));
+}, REQUEST_TIMEOUT_MS);
 ```
 
 **Reference:** `gsd-wallet/src/content-script/inpage.ts`
+
+### Service worker race condition
+
+When Chrome restarts the service worker, `autoUnlock` reinitializes the wallet. API handlers must wait for this to complete:
+
+```typescript
+// In your API handler, before using the facade:
+await walletManager.waitForReady();
+```
+
+Without this, API calls can hit a dead or partially-initialized facade and hang indefinitely.
+
+**Reference:** `gsd-wallet/src/background/walletManager.ts:waitForReady`, `gsd-wallet/src/background/connectedApiHandler.ts`
 
 ---
 
@@ -527,13 +562,15 @@ A wallet showing NIGHT=0 with contract tokens present is **correct behavior, not
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Wallet hangs on "Initializing" | `WalletFacade.init()` is waiting for node WebSocket connection | Respond to UI immediately after storing the wallet; run facade init in background |
+| Wallet hangs on "Initializing" | `facade.start()` blocks until connected | Subscribe to state before calling `start()`; don't await `start()` — let it run in background. Emit an initial zero-progress state so UI renders immediately |
 | State updates continue after clearing wallet | Old facade RxJS subscription still emitting | Guard state handler: ignore updates when `hasVault === false` |
 | `TypeError: Do not know how to serialize a BigInt` | BigInt passed through `postMessage` or `JSON.stringify` | Convert to string at every IPC boundary |
 | Address shows as empty string | `MidnightBech32m.encode()` threw (address not yet synced) | Wrap in try-catch, show placeholder |
 | UTXO hash "Not found in indexer" | `intentHash` is not a transaction hash | Don't use intent hash as indexer lookup key |
 | Popup scrolls past bottom | Chrome enforces viewport height limit (~600px) | Cap popup height; offer "Open in Full Tab" |
 | Service worker dies mid-operation | Chrome kills idle SWs after ~30s | Use `chrome.alarms` keepalive + persistent ports |
+| API call hangs after SW restart | `autoUnlock` reinitializes facade while API handler uses old ref | Gate API handlers with `waitForReady()` before using facade |
+| `balanceUnboundTransaction` hangs | Facade balance method blocks indefinitely for some contract txs | Under investigation — diagnostics panel helps trace the exact stall point |
 | `HDWallet.fromSeed` returns but wallet fails later | Didn't check `.type === 'seedOk'` | Always check tagged return types |
 | Facade created but never syncs | Forgot to call `facade.start()` after `init()` | `.init()` and `.start()` are separate steps |
 | DApps can't discover wallet | Missing `midnight#ready` event dispatch | Dispatch `CustomEvent('midnight#ready')` after injection |
@@ -573,14 +610,19 @@ The GSD Wallet provides working implementations of every pattern in this guide:
 | Pattern | File | Key function/section |
 |---------|------|---------------------|
 | Service worker polyfills | `src/background/index.ts` | Lines 1-38 |
-| Facade initialization | `src/background/walletManager.ts` | `initializeWallet()` |
+| Facade initialization (two-phase) | `src/background/walletManager.ts` | `initializeWalletCore()` — Phase 1: subscribe + emit initial state; Phase 2: `facade.start()` in background |
+| SW race condition guard | `src/background/walletManager.ts` | `waitForReady()` |
 | State serialization | `src/background/walletManager.ts` | `serializeState()` |
-| Sync progress calculation | `src/background/walletManager.ts` | Lines 125-157 |
+| Per-wallet sync progress | `src/popup/pages/Dashboard.tsx` | `MiniSyncBar` — three bars showing applied/total per wallet |
+| Granular sync diagnostics | `src/background/walletManager.ts` | `sync:phase`, `sync:connected`, `sync:progress` events |
+| Diagnostic event logger | `src/background/diagnosticLogger.ts` | `emit()`, `getBacklog()`, `onEvent()` |
+| Diagnostic event broadcasting | `src/background/messageRouter.ts` | `onEvent` → `DIAGNOSTIC_EVENT` to ports |
 | Message protocol types | `src/shared/messages.ts` | `PopupRequest`, `PopupResponse` |
-| DApp connector (inpage) | `src/content-script/inpage.ts` | Full file |
+| DApp connector (inpage) | `src/content-script/inpage.ts` | Full file (120s timeout) |
 | Content script bridge | `src/content-script/content-script.ts` | Full file |
-| DApp API handler | `src/background/connectedApiHandler.ts` | `handleApiCall()` |
+| DApp API handler | `src/background/connectedApiHandler.ts` | `handleApiCall()` with structured emit |
 | Explorer GraphQL queries | `src/shared/indexerQuery.ts` | `fetchTxDetail()`, `fetchBlockDetail()`, `fetchContractDetail()` |
+| Diagnostics panel UI | `src/popup/components/DiagnosticsPanel.tsx` | Filters, auto-scroll, expand/collapse |
 | Environment configuration | `src/shared/environments.ts` | `ENVIRONMENTS` map |
 | Async wallet creation | `src/background/messageRouter.ts` | `ADD_WALLET` case |
 | Clear wallet with state guard | `src/popup/hooks/useWalletState.ts` | `hasVault !== false` guard |
@@ -599,23 +641,15 @@ Code audit performed 2026-03-28 against wallet-sdk v3.0.0 documentation.
 | Area | Status |
 |------|--------|
 | HD key derivation (tagged union checks, memory cleanup) | Correct |
-| WalletFacade two-step init (init + start) | Correct |
+| WalletFacade two-phase init (init → subscribe → start in background) | Correct |
 | State serialization (BigInt, address encoding, sync progress) | Correct |
 | Balance map iteration (all token types, not just NIGHT) | Correct |
-| DApp connector API (18 methods, BigInt serialization, session TTL) | Correct |
+| DApp connector API (17 methods, BigInt serialization, session TTL) | Correct |
 | `NIGHT_TOKEN_ID` hardcoding | Correct (equivalent to `ledger.unshieldedToken().raw`) |
 
 ### Bug found and fixed
 
-**`core/transfer.ts:74-85` — conditional signing on internal transfer path.** The internal UI transfer code only signed when `tokenType === 'unshielded'`, skipping signing for shielded transfers. The DApp connector path (`connectedApiHandler.ts:308-317`) correctly signs unconditionally. **Fixed:** signing now runs whenever `unshieldedKeystore` is available, matching the DApp path and SDK examples.
-
-### Undocumented SDK workarounds
-
-**`connectedApiHandler.ts:150-251` — `balanceUnsealedTransaction` retry logic.** Contains a complex retry-and-fallback mechanism not documented anywhere in the SDK:
-- Waits up to 60s for pending coins to clear before balancing
-- Retries balancing 3 times for segment_id collisions
-- Falls back to returning the unbalanced transaction if balancing fails repeatedly
-- **Risk:** The fallback returns a transaction that may be rejected by the network (fees not paid)
+**`core/transfer.ts` — conditional signing on internal transfer path.** The internal UI transfer code originally only signed when `tokenType === 'unshielded'`, skipping signing for shielded transfers. **Fixed:** signing now runs whenever `unshieldedKeystore` is available, matching the DApp connector path and SDK examples.
 
 ### Not implemented (documented in SDK)
 

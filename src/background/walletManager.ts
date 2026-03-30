@@ -20,6 +20,7 @@ import type {
 } from '@shared/types';
 import { NIGHT_TOKEN_ID } from '@shared/constants';
 import { getEnvironmentConfig } from '@shared/environments';
+import { emit } from './diagnosticLogger';
 
 export interface WalletSecretKeys {
   shieldedSecretKeys: ledger.ZswapSecretKeys;
@@ -36,13 +37,28 @@ interface ActiveWallet {
   walletName: string;
   subscription: { unsubscribe(): void };
   latestState: FacadeState | null;
+  startPromise: Promise<void> | null;
 }
 
 let activeWallet: ActiveWallet | null = null;
 let stateListeners: Array<(state: SerializedWalletState) => void> = [];
+let initializingPromise: Promise<void> | null = null;
 
 export function getActiveWallet(): ActiveWallet | null {
   return activeWallet;
+}
+
+/**
+ * Wait for any in-progress wallet initialization to complete.
+ * API handlers must call this before using the facade to avoid
+ * racing with service worker auto-unlock reinitialization.
+ */
+export async function waitForReady(): Promise<void> {
+  if (initializingPromise) {
+    emit('debug', 'wallet', 'waitForReady: blocked on initialization');
+    await initializingPromise;
+    emit('debug', 'wallet', 'waitForReady: initialization complete');
+  }
 }
 
 export function getFacade(): WalletFacade | null {
@@ -163,6 +179,7 @@ function serializeState(
       progress: {
         applied: Number(sp.appliedIndex),
         highest: Number(sp.highestRelevantWalletIndex),
+        highestIndex: Number(sp.highestIndex),
         connected: sp.isConnected,
       },
     },
@@ -174,6 +191,7 @@ function serializeState(
       progress: {
         applied: Number(up.appliedId),
         highest: Number(up.highestTransactionId),
+        highestIndex: Number(up.highestTransactionId),
         connected: up.isConnected,
       },
     },
@@ -184,11 +202,19 @@ function serializeState(
       progress: {
         applied: Number(dp.appliedIndex),
         highest: Number(dp.highestRelevantWalletIndex),
+        highestIndex: Number(dp.highestIndex),
         connected: dp.isConnected,
       },
     },
     overallSyncPercent,
     isSynced: reallySynced,
+    syncPhase: reallySynced
+      ? 'synced' as const
+      : !allConnected
+        ? 'connecting' as const
+        : overallSyncPercent >= 90
+          ? 'nearly-synced' as const
+          : 'catching-up' as const,
     connections: {
       node: up.isConnected,
       indexer: sp.isConnected,
@@ -198,7 +224,7 @@ function serializeState(
   };
 }
 
-export async function initializeWallet(
+export function initializeWallet(
   seed: Uint8Array,
   environment: Environment,
   accountIndex: number = 0,
@@ -210,15 +236,38 @@ export async function initializeWallet(
     provingServerUrl: string;
   },
 ): Promise<void> {
-  await stopWallet();
+  const doInit = async () => {
+    await stopWallet();
+    await initializeWalletCore(seed, environment, accountIndex, walletName, customUrls);
+  };
+  initializingPromise = doInit().finally(() => { initializingPromise = null; });
+  return initializingPromise;
+}
+
+async function initializeWalletCore(
+  seed: Uint8Array,
+  environment: Environment,
+  accountIndex: number = 0,
+  walletName: string = '',
+  customUrls?: {
+    nodeWsUrl: string;
+    indexerHttpUrl: string;
+    indexerWsUrl: string;
+    provingServerUrl: string;
+  },
+): Promise<void> {
+  const t0 = Date.now();
+  emit('info', 'wallet', `Initializing wallet`, { environment, accountIndex, walletName });
 
   const envConfig = getEnvironmentConfig(environment);
   const effectiveConfig = customUrls
     ? { ...envConfig, ...customUrls }
     : envConfig;
 
+  emit('debug', 'wallet', 'Deriving HD keys');
   const hdWallet = HDWallet.fromSeed(seed);
   if (hdWallet.type !== 'seedOk') {
+    emit('error', 'wallet', 'HDWallet.fromSeed failed', { type: hdWallet.type });
     throw new Error('Failed to initialize HDWallet from seed');
   }
 
@@ -228,10 +277,12 @@ export async function initializeWallet(
     .deriveKeysAt(0);
 
   if (derivationResult.type !== 'keysDerived') {
+    emit('error', 'wallet', 'Key derivation failed', { type: derivationResult.type });
     throw new Error('Failed to derive keys from HD wallet');
   }
 
   hdWallet.hdWallet.clear();
+  emit('debug', 'wallet', 'Keys derived, creating secret keys');
 
   const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(
     derivationResult.keys[Roles.Zswap],
@@ -256,6 +307,8 @@ export async function initializeWallet(
     txHistoryStorage: new InMemoryTransactionHistoryStorage(),
   };
 
+  emit('info', 'wallet', 'Creating WalletFacade', { networkId: effectiveConfig.networkId, indexer: effectiveConfig.indexerHttpUrl, node: effectiveConfig.nodeWsUrl, prover: effectiveConfig.provingServerUrl });
+  const facadeT0 = Date.now();
   const facade = await WalletFacade.init({
     configuration: config,
     shielded: (cfg) =>
@@ -273,8 +326,14 @@ export async function initializeWallet(
       ),
     provingService: () => makeServerProvingService({ provingServerUrl: new URL(effectiveConfig.provingServerUrl) }),
   });
+  emit('info', 'wallet', 'WalletFacade.init complete', undefined, Date.now() - facadeT0);
 
-  await facade.start(shieldedSecretKeys, dustSecretKey);
+  // --- Phase 1: Subscribe + set activeWallet (fast, unblocks UI) ---
+
+  let lastStatus = '';
+  let lastPhase = '';
+  let lastProgressEmit = 0;
+  const prevConnections = { shielded: false, unshielded: false, dust: false };
 
   const sub = facade.state().subscribe((facadeState) => {
     if (activeWallet) {
@@ -285,6 +344,53 @@ export async function initializeWallet(
       environment,
       accountIndex,
     );
+
+    // Emit on status transitions
+    if (serialized.status !== lastStatus) {
+      emit('info', 'state', `Status: ${lastStatus || '(none)'} -> ${serialized.status}`, {
+        shielded: serialized.shielded.progress,
+        unshielded: serialized.unshielded.progress,
+        dust: serialized.dust.progress,
+        syncPercent: serialized.overallSyncPercent,
+      });
+      lastStatus = serialized.status;
+    }
+
+    // Emit on sync phase transitions
+    if (serialized.syncPhase !== lastPhase) {
+      emit('info', 'sync', `Phase: ${lastPhase || '(none)'} -> ${serialized.syncPhase}`, {
+        shielded: serialized.shielded.syncPercent,
+        unshielded: serialized.unshielded.syncPercent,
+        dust: serialized.dust.syncPercent,
+      });
+      lastPhase = serialized.syncPhase;
+    }
+
+    // Emit per-wallet connection changes
+    const conns = {
+      shielded: serialized.shielded.progress.connected,
+      unshielded: serialized.unshielded.progress.connected,
+      dust: serialized.dust.progress.connected,
+    };
+    for (const wallet of ['shielded', 'unshielded', 'dust'] as const) {
+      if (conns[wallet] !== prevConnections[wallet]) {
+        emit('info', 'sync', `${wallet}: ${conns[wallet] ? 'connected' : 'disconnected'}`);
+        prevConnections[wallet] = conns[wallet];
+      }
+    }
+
+    // Throttled progress events (every 2s)
+    const now = Date.now();
+    if (now - lastProgressEmit >= 2000) {
+      emit('debug', 'sync', 'Sync progress', {
+        shielded: `${serialized.shielded.progress.applied}/${serialized.shielded.progress.highest} (${serialized.shielded.syncPercent}%)`,
+        unshielded: `${serialized.unshielded.progress.applied}/${serialized.unshielded.progress.highest} (${serialized.unshielded.syncPercent}%)`,
+        dust: `${serialized.dust.progress.applied}/${serialized.dust.progress.highest} (${serialized.dust.syncPercent}%)`,
+        overall: serialized.overallSyncPercent,
+      });
+      lastProgressEmit = now;
+    }
+
     chrome.storage.session.set({ gsdLastState: serialized });
     for (const listener of stateListeners) {
       listener(serialized);
@@ -301,23 +407,57 @@ export async function initializeWallet(
     walletName,
     subscription: sub,
     latestState: null,
+    startPromise: null,
   };
 
   chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.4 });
+  emit('info', 'wallet', 'WalletFacade ready, starting sync in background', { environment, networkId: effectiveConfig.networkId }, Date.now() - t0);
+
+  // Emit initial zero-progress state so popup renders immediately
+  const initialState: SerializedWalletState = {
+    status: 'initializing',
+    environment,
+    activeAccountIndex: accountIndex,
+    shielded: { address: '', balances: {}, coinCount: 0, syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+    unshielded: { address: '', balances: {}, utxos: [], syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+    dust: { address: '', balance: '0', syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+    overallSyncPercent: 0,
+    isSynced: false,
+    syncPhase: 'connecting',
+    connections: { node: false, indexer: false, prover: false },
+    activeWalletName: walletName,
+  };
+  chrome.storage.session.set({ gsdLastState: initialState });
+  for (const listener of stateListeners) {
+    listener(initialState);
+  }
+
+  // --- Phase 2: Start facade in background (slow, non-blocking) ---
+
+  emit('info', 'wallet', 'Starting facade (connecting to indexer/node)');
+  const startT0 = Date.now();
+  const startPromise = facade.start(shieldedSecretKeys, dustSecretKey)
+    .then(() => {
+      emit('info', 'wallet', 'facade.start complete', undefined, Date.now() - startT0);
+    })
+    .catch((err) => {
+      emit('error', 'wallet', 'facade.start failed', { error: String(err) }, Date.now() - startT0);
+    });
+  activeWallet.startPromise = startPromise;
 }
 
 export async function stopWallet(): Promise<void> {
   if (activeWallet) {
-    console.log('[GSD] Stopping wallet...');
+    emit('info', 'wallet', 'Stopping wallet');
     activeWallet.subscription.unsubscribe();
     try {
       await activeWallet.facade.stop();
     } catch (e) {
-      console.warn('[GSD] Facade stop error (ignored):', e);
+      emit('warn', 'wallet', 'Facade stop error (ignored)', { error: String(e) });
     }
     activeWallet = null;
     chrome.alarms.clear('gsd-keepalive');
-    console.log('[GSD] Wallet stopped');
+    emit('info', 'wallet', 'Wallet stopped');
   }
 }
 

@@ -38,18 +38,13 @@ if (typeof window === 'undefined') {
 }
 
 import { setupMessageRouter } from './messageRouter';
+import { emit } from './diagnosticLogger';
 
 // Initialize message routing on service worker start
 setupMessageRouter();
 
-// Log lifecycle events for debugging
-console.log('[GSD] Service worker started');
+emit('info', 'sw', 'Service worker started');
 
-// Handle install
 chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === 'install') {
-    console.log('[GSD] Extension installed');
-  } else if (details.reason === 'update') {
-    console.log('[GSD] Extension updated');
-  }
+  emit('info', 'sw', `Extension ${details.reason}`, { reason: details.reason, previousVersion: details.previousVersion });
 });
