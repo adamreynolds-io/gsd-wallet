@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { PopupResponse } from '@shared/messages';
+import type { SerializedWalletState } from '@shared/types';
 import { usePopupStore } from '@popup/store/popupStore';
 
 function handleMessage(msg: PopupResponse): void {
@@ -21,7 +22,6 @@ function handleMessage(msg: PopupResponse): void {
 export function useWalletConnection(): void {
   const portRef = useRef<chrome.runtime.Port | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const unmounted = useRef(false);
 
   useEffect(() => {
@@ -38,10 +38,6 @@ export function useWalletConnection(): void {
 
       port.onDisconnect.addListener(() => {
         portRef.current = null;
-        if (pollTimer.current) {
-          clearInterval(pollTimer.current);
-          pollTimer.current = null;
-        }
         store.addDiagnosticEvent({
           id: Date.now(),
           timestamp: Date.now(),
@@ -73,16 +69,6 @@ export function useWalletConnection(): void {
 
       port.postMessage({ type: 'GET_STATE' });
       port.postMessage({ type: 'GET_DIAGNOSTIC_BACKLOG' });
-
-      // Poll for state every 2s as a fallback for broadcast delivery issues
-      if (pollTimer.current) clearInterval(pollTimer.current);
-      pollTimer.current = setInterval(() => {
-        try {
-          port.postMessage({ type: 'GET_STATE' });
-        } catch {
-          // Port dead — reconnect will handle it
-        }
-      }, 2000);
     }
 
     // Check if wallets exist
@@ -99,8 +85,8 @@ export function useWalletConnection(): void {
       },
     );
 
-    // Read cached state so the UI shows correct network + last known state immediately
-    chrome.storage.session.get(['gsdEnvironment', 'gsdLastState']).then((result) => {
+    // Read cached state and diagnostic events from session storage
+    chrome.storage.session.get(['gsdEnvironment', 'gsdLastState', 'gsdDiagnosticEvents']).then((result) => {
       const store = usePopupStore.getState();
       if (result['gsdLastState'] && !store.walletState) {
         store.setWalletState(result['gsdLastState']);
@@ -110,17 +96,36 @@ export function useWalletConnection(): void {
       } else if (result['gsdEnvironment']) {
         store.setEnvironment(result['gsdEnvironment']);
       }
+      if (result['gsdDiagnosticEvents']?.length) {
+        store.addDiagnosticEventsBatch(result['gsdDiagnosticEvents']);
+      }
     });
+
+    // Live state updates via storage change listener — works regardless of port state
+    const storageListener = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
+      if (area !== 'session') return;
+      if (changes['gsdLastState']?.newValue) {
+        const state = changes['gsdLastState'].newValue as SerializedWalletState;
+        const store = usePopupStore.getState();
+        if (store.hasVault !== false) {
+          if (store.hasVault === null) store.setHasVault(true);
+          store.setWalletState(state);
+        }
+      }
+      if (changes['gsdDiagnosticEvents']?.newValue) {
+        const store = usePopupStore.getState();
+        store.addDiagnosticEventsBatch(changes['gsdDiagnosticEvents'].newValue);
+      }
+    };
+    chrome.storage.onChanged.addListener(storageListener);
 
     connect();
 
     return () => {
       unmounted.current = true;
+      chrome.storage.onChanged.removeListener(storageListener);
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
-      }
-      if (pollTimer.current) {
-        clearInterval(pollTimer.current);
       }
       if (portRef.current) {
         portRef.current.disconnect();

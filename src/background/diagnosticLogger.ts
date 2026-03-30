@@ -5,8 +5,8 @@ import type {
 } from '@shared/types';
 
 const MAX_EVENTS = 2000;
-const FLUSH_DELAY_MS = 500;
-const FLUSH_BATCH_SIZE = 10;
+const FLUSH_DELAY_MS = 100;
+const FLUSH_BATCH_SIZE = 3;
 const STORAGE_KEY = 'gsdDiagnosticEvents';
 
 export const sessionId = crypto.randomUUID();
