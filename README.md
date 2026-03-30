@@ -121,8 +121,8 @@ Intentional trade-offs for developer convenience:
 
 ## Known issues
 
-- **Mainnet sync stalls** — The mainnet RPC node (`wss://rpc.mainnet.midnight.network`) periodically drops WebSocket connections with `1000: Normal Closure`. The `@polkadot/api` SDK reconnects automatically but sync can stall. The wallet detects this after 30s and shows "Stalled". Closing and reopening the popup triggers a fresh connection. This is a mainnet infrastructure issue, not a wallet bug.
-- **First mainnet sync takes minutes** — ~87k shielded + ~87k dust events must be downloaded and processed client-side. This is by design for privacy (see "How sync works" above). Persistent SDK storage ensures sync completes across service worker restarts.
+- **Mainnet RPC disconnects** — The mainnet RPC node (`wss://rpc.mainnet.midnight.network`) periodically drops WebSocket connections with `1000: Normal Closure`. The `@polkadot/api` SDK reconnects automatically but sync can stall temporarily. The wallet detects stalls after 30s and shows "Stalled". No user action needed — persistent storage preserves progress across SW restarts, and the offscreen keepalive document extends SW lifetime during active sync.
+- **First mainnet sync takes minutes** — ~87k shielded + ~87k dust events must be downloaded and processed client-side. This is by design for privacy (see "How sync works" above). Persistent SDK storage ensures sync completes across service worker restarts — no need to keep the popup open.
 
 ## Documentation
 
