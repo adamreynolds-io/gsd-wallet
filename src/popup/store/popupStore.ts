@@ -9,7 +9,7 @@ import type {
 } from '@shared/types';
 import { DIAGNOSTIC_LEVELS, DIAGNOSTIC_CATEGORIES } from '@shared/types';
 
-const MAX_DIAGNOSTIC_EVENTS = 1000;
+const MAX_DIAGNOSTIC_EVENTS = 2000;
 
 function makeFilterRecord<T extends string>(keys: readonly T[]): Record<T, boolean> {
   const rec = {} as Record<T, boolean>;

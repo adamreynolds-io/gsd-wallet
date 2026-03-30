@@ -37,13 +37,24 @@ if (typeof window === 'undefined') {
   (globalThis as Record<string, unknown>)['window'] = globalThis;
 }
 
+import { interceptSdkConsole } from './sdkConsoleInterceptor';
+import { emit, rehydrate, sessionId } from './diagnosticLogger';
 import { setupMessageRouter } from './messageRouter';
-import { emit } from './diagnosticLogger';
 
-// Initialize message routing on service worker start
-setupMessageRouter();
+// Intercept SDK console output before any SDK imports
+interceptSdkConsole();
 
-emit('info', 'sw', 'Service worker started');
+// Restore diagnostic events from previous SW lifecycle
+rehydrate().then(() => {
+  // Initialize message routing (triggers SDK imports via auto-unlock)
+  setupMessageRouter();
+
+  emit('info', 'sw', 'Service worker started', { sessionId });
+}).catch((err) => {
+  // If rehydrate fails, still start the router
+  setupMessageRouter();
+  emit('error', 'sw', 'Failed to rehydrate diagnostic events', { error: String(err) });
+});
 
 chrome.runtime.onInstalled.addListener((details) => {
   emit('info', 'sw', `Extension ${details.reason}`, { reason: details.reason, previousVersion: details.previousVersion });

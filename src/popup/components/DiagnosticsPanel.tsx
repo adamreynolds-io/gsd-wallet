@@ -26,6 +26,7 @@ const CATEGORY_COLORS: Record<DiagnosticCategory, string> = {
   wallet: 'text-green-400',
   state: 'text-cyan-400',
   sync: 'text-emerald-400',
+  sdk: 'text-orange-400',
   dapp: 'text-purple-400',
   api: 'text-blue-400',
   popup: 'text-indigo-400',
@@ -47,7 +48,7 @@ const LEVEL_TOOLTIPS: Record<DiagnosticLevel, string> = {
 };
 
 const CATEGORY_SHORT: Record<DiagnosticCategory, string> = {
-  sw: 'SW', wallet: 'Wal', state: 'Sta', sync: 'Sync',
+  sw: 'SW', wallet: 'Wal', state: 'Sta', sync: 'Sync', sdk: 'SDK',
   dapp: 'DApp', api: 'API', popup: 'Pop', tx: 'Tx',
   indexer: 'Idx', storage: 'Sto', error: 'Err',
 };
@@ -57,6 +58,7 @@ const CATEGORY_TOOLTIPS: Record<DiagnosticCategory, string> = {
   wallet: 'Wallet init, keys, facade',
   state: 'Sync status transitions',
   sync: 'Per-wallet sync progress, connections, phase transitions',
+  sdk: 'Wallet-SDK internal messages (WebSocket, RPC, @polkadot)',
   dapp: 'DApp connect/disconnect',
   api: 'DApp API method calls',
   popup: 'Popup message handling',
@@ -147,11 +149,12 @@ export function DiagnosticsPanel() {
           title="Collapse all"
         >&minus;</button>
         <IconBtn icon="copy" title="Copy all visible events as JSON" onClick={copyAll} />
+        <IconBtn icon="download" title="Download all events as NDJSON" onClick={() => downloadLogs(events)} />
         <IconBtn icon="trash" title="Clear events" onClick={clearEvents} />
       </div>
 
       {/* Category filters */}
-      <div className="flex items-center gap-x-1.5 gap-y-0.5 px-2 py-0.5 shrink-0 border-b border-midnight-500">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-2 py-0.5 shrink-0 border-b border-midnight-500">
         <SelectAllCheck
           checked={DIAGNOSTIC_CATEGORIES.every((c) => categoryFilter[c])}
           onChange={(on) => DIAGNOSTIC_CATEGORIES.forEach((c) => setCategory(c, on))}
@@ -264,9 +267,21 @@ function EventRow({ event, expandCollapseSignal }: { event: DiagnosticEvent; exp
 
 const ICONS = {
   copy: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>,
+  download: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>,
   trash: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>,
   check: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4caf50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>,
 } as const;
+
+function downloadLogs(events: DiagnosticEvent[]): void {
+  const ndjson = events.map((e) => JSON.stringify(e)).join('\n');
+  const blob = new Blob([ndjson], { type: 'application/x-ndjson' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `gsd-diagnostics-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.ndjson`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 function SelectAllCheck({ checked, onChange, title }: {
   checked: boolean;

@@ -146,6 +146,7 @@ export type DiagnosticCategory =
   | 'wallet'
   | 'state'
   | 'sync'
+  | 'sdk'
   | 'dapp'
   | 'api'
   | 'popup'
@@ -157,7 +158,7 @@ export type DiagnosticCategory =
 export const DIAGNOSTIC_LEVELS: readonly DiagnosticLevel[] = ['debug', 'info', 'warn', 'error'];
 
 export const DIAGNOSTIC_CATEGORIES: readonly DiagnosticCategory[] = [
-  'sw', 'wallet', 'state', 'sync', 'dapp', 'api', 'popup', 'tx', 'indexer', 'storage', 'error',
+  'sw', 'wallet', 'state', 'sync', 'sdk', 'dapp', 'api', 'popup', 'tx', 'indexer', 'storage', 'error',
 ];
 
 export interface DiagnosticEvent {
