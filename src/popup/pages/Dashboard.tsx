@@ -164,21 +164,21 @@ export function Dashboard() {
             </div>
           </div>
 
-          {!state.isSynced && (
-            <div className="space-y-1">
+          <div className="space-y-1">
+            {!state.isSynced && (
               <div className="w-full h-1.5 bg-midnight-900 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-accent-purple to-accent-magenta rounded-full transition-[width] duration-300"
                   style={{ width: `${state.overallSyncPercent}%` }}
                 />
               </div>
-              <div className="space-y-0.5">
-                <SyncDetailRow label="Shielded" color="text-fuchsia-400" progress={state.shielded.progress} percent={state.shielded.syncPercent} />
-                <SyncDetailRow label="Unshielded" color="text-blue-400" progress={state.unshielded.progress} percent={state.unshielded.syncPercent} />
-                <SyncDetailRow label="Dust" color="text-amber-400" progress={state.dust.progress} percent={state.dust.syncPercent} />
-              </div>
+            )}
+            <div className="space-y-0.5">
+              <SyncDetailRow label="Shielded" color="text-fuchsia-400" progress={state.shielded.progress} percent={state.shielded.syncPercent} />
+              <SyncDetailRow label="Unshielded" color="text-blue-400" progress={state.unshielded.progress} percent={state.unshielded.syncPercent} />
+              <SyncDetailRow label="Dust" color="text-amber-400" progress={state.dust.progress} percent={state.dust.syncPercent} />
             </div>
-          )}
+          </div>
 
           <div className="space-y-0.5">
             <AddrRow label="Shield" address={state.shielded.address} />
