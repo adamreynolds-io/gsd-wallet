@@ -155,9 +155,13 @@ function serializeState(
     : (Number(dp.appliedIndex) / Number(dp.highestRelevantWalletIndex)) * 100;
 
   const allConnected = sp.isConnected && up.isConnected && dp.isConnected;
-  const overallSyncPercent = Math.floor(
-    (shieldedPercent + unshieldedPercent + dustPercent) / 3,
-  );
+  const totalApplied =
+    Number(sp.appliedIndex) + Number(up.appliedId) + Number(dp.appliedIndex);
+  const totalHighest =
+    Number(sp.highestRelevantWalletIndex) + Number(up.highestTransactionId) + Number(dp.highestRelevantWalletIndex);
+  const overallSyncPercent = totalHighest > 0
+    ? Math.floor((totalApplied / totalHighest) * 100)
+    : (allConnected ? 100 : 0);
   const reallySynced = facadeState.isSynced || (allConnected && shieldedSynced && unshieldedSynced && dustSynced);
 
   let dustBal = 0n;

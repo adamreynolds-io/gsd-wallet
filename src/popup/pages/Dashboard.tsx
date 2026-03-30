@@ -384,7 +384,7 @@ function SyncRow({ state }: { state: SerializedWalletState }) {
   const totalApplied = state.shielded.progress.applied + state.unshielded.progress.applied + state.dust.progress.applied;
   const totalHighest = state.shielded.progress.highest + state.unshielded.progress.highest + state.dust.progress.highest;
   const allConnected = state.shielded.progress.connected && state.unshielded.progress.connected && state.dust.progress.connected;
-  const percent = state.overallSyncPercent;
+  const percent = totalHighest > 0 ? Math.floor((totalApplied / totalHighest) * 100) : 0;
   return (
     <div className="mb-1.5">
       <div className="flex justify-between text-xs text-gray-500 mb-0.5">
