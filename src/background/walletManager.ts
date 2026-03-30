@@ -38,6 +38,7 @@ interface ActiveWallet {
   subscription: { unsubscribe(): void };
   latestState: FacadeState | null;
   startPromise: Promise<void> | null;
+  stallCheckInterval: ReturnType<typeof setInterval> | null;
 }
 
 let activeWallet: ActiveWallet | null = null;
@@ -333,6 +334,9 @@ async function initializeWalletCore(
   let lastStatus = '';
   let lastPhase = '';
   let lastProgressEmit = 0;
+  let lastAppliedTotal = 0;
+  let lastAdvanceTime = Date.now();
+  let stallWarned = false;
   const prevConnections = { shielded: false, unshielded: false, dust: false };
 
   const sub = facade.state().subscribe((facadeState) => {
@@ -382,7 +386,31 @@ async function initializeWalletCore(
     // Throttled progress events (every 2s)
     const now = Date.now();
     if (now - lastProgressEmit >= 2000) {
-      emit('debug', 'sync', 'Sync progress', {
+      const currentAppliedTotal =
+        serialized.shielded.progress.applied +
+        serialized.unshielded.progress.applied +
+        serialized.dust.progress.applied;
+
+      if (currentAppliedTotal !== lastAppliedTotal) {
+        lastAppliedTotal = currentAppliedTotal;
+        lastAdvanceTime = now;
+        stallWarned = false;
+      }
+
+      // Detect stall: no progress for 30s while not synced
+      const stallSeconds = Math.floor((now - lastAdvanceTime) / 1000);
+      const isStalled = !serialized.isSynced && stallSeconds >= 30;
+
+      if (isStalled && !stallWarned) {
+        emit('warn', 'sync', `Sync stalled — no progress for ${stallSeconds}s`, {
+          shielded: serialized.shielded.progress,
+          unshielded: serialized.unshielded.progress,
+          dust: serialized.dust.progress,
+        });
+        stallWarned = true;
+      }
+
+      emit('debug', 'sync', isStalled ? `Sync progress (stalled ${stallSeconds}s)` : 'Sync progress', {
         shielded: `${serialized.shielded.progress.applied}/${serialized.shielded.progress.highest} (${serialized.shielded.syncPercent}%)`,
         unshielded: `${serialized.unshielded.progress.applied}/${serialized.unshielded.progress.highest} (${serialized.unshielded.syncPercent}%)`,
         dust: `${serialized.dust.progress.applied}/${serialized.dust.progress.highest} (${serialized.dust.syncPercent}%)`,
@@ -391,11 +419,42 @@ async function initializeWalletCore(
       lastProgressEmit = now;
     }
 
+    // Override syncPhase if stalled
+    if (!serialized.isSynced && (Date.now() - lastAdvanceTime) >= 30_000) {
+      serialized.syncPhase = 'stalled';
+    }
+
     chrome.storage.session.set({ gsdLastState: serialized });
     for (const listener of stateListeners) {
       listener(serialized);
     }
   });
+
+  // Periodic stall detection — runs even when the observable stops emitting
+  const stallCheckInterval = setInterval(() => {
+    if (!activeWallet || activeWallet.facade !== facade) {
+      clearInterval(stallCheckInterval);
+      return;
+    }
+    const now = Date.now();
+    const stallSeconds = Math.floor((now - lastAdvanceTime) / 1000);
+    const latestSerialized = getLatestSerializedState();
+    if (latestSerialized && !latestSerialized.isSynced && stallSeconds >= 30) {
+      if (!stallWarned) {
+        emit('warn', 'sync', `Sync stalled — no progress for ${stallSeconds}s (connection may have dropped)`, {
+          shielded: latestSerialized.shielded.progress,
+          unshielded: latestSerialized.unshielded.progress,
+          dust: latestSerialized.dust.progress,
+        });
+        stallWarned = true;
+      }
+      latestSerialized.syncPhase = 'stalled';
+      chrome.storage.session.set({ gsdLastState: latestSerialized });
+      for (const listener of stateListeners) {
+        listener(latestSerialized);
+      }
+    }
+  }, 10_000);
 
   activeWallet = {
     facade,
@@ -408,6 +467,7 @@ async function initializeWalletCore(
     subscription: sub,
     latestState: null,
     startPromise: null,
+    stallCheckInterval,
   };
 
   chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.4 });
@@ -450,6 +510,9 @@ export async function stopWallet(): Promise<void> {
   if (activeWallet) {
     emit('info', 'wallet', 'Stopping wallet');
     activeWallet.subscription.unsubscribe();
+    if (activeWallet.stallCheckInterval) {
+      clearInterval(activeWallet.stallCheckInterval);
+    }
     try {
       await activeWallet.facade.stop();
     } catch (e) {

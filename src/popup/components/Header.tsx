@@ -15,7 +15,7 @@ export function Header() {
   const activeWalletName = walletState?.activeWalletName ?? '';
 
   const currentEnv = walletState?.environment ?? environment;
-  const isActive = status === 'synced' || status === 'syncing' || status === 'initializing';
+  const isActive = status !== 'uninitialized';
   const isLocalnet = currentEnv === 'undeployed';
 
   const refreshWallets = useCallback(() => {

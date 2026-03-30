@@ -528,10 +528,11 @@ function UtxoList({ utxos }: {
 /* ── Shared ── */
 
 const SYNC_PHASE_LABELS: Record<string, string> = {
-  connecting: 'Connecting to indexer/node...',
-  'catching-up': 'Syncing events...',
-  'nearly-synced': 'Almost synced...',
+  connecting: 'Connecting...',
+  'catching-up': 'Syncing...',
+  'nearly-synced': 'Almost synced',
   synced: 'Synced',
+  stalled: 'Stalled',
 };
 
 const TX_TYPE_LABELS: Record<string, string> = {

@@ -99,7 +99,7 @@ export interface SerializedWalletState {
   };
   overallSyncPercent: number;
   isSynced: boolean;
-  syncPhase: 'connecting' | 'catching-up' | 'nearly-synced' | 'synced';
+  syncPhase: 'connecting' | 'catching-up' | 'nearly-synced' | 'synced' | 'stalled';
   connections: {
     node: boolean;
     indexer: boolean;
