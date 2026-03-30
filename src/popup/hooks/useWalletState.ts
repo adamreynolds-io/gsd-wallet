@@ -2,46 +2,59 @@ import { useEffect, useRef } from 'react';
 import type { PopupResponse } from '@shared/messages';
 import { usePopupStore } from '@popup/store/popupStore';
 
+function handleMessage(msg: PopupResponse): void {
+  const store = usePopupStore.getState();
+  if (msg.type === 'STATE_UPDATE') {
+    if (store.hasVault !== false) {
+      if (store.hasVault === null) {
+        store.setHasVault(true);
+      }
+      store.setWalletState(msg.state);
+    }
+  } else if (msg.type === 'DIAGNOSTIC_EVENT') {
+    store.addDiagnosticEvent(msg.event);
+  } else if (msg.type === 'DIAGNOSTIC_EVENTS_BATCH') {
+    store.addDiagnosticEventsBatch(msg.events);
+  }
+}
+
 export function useWalletConnection(): void {
   const portRef = useRef<chrome.runtime.Port | null>(null);
-  const setWalletState = usePopupStore((s) => s.setWalletState);
-  const setHasVault = usePopupStore((s) => s.setHasVault);
-  const setStatus = usePopupStore((s) => s.setStatus);
-  const addDiagnosticEvent = usePopupStore((s) => s.addDiagnosticEvent);
-  const addDiagnosticEventsBatch = usePopupStore((s) => s.addDiagnosticEventsBatch);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmounted = useRef(false);
 
   useEffect(() => {
-    const port = chrome.runtime.connect({ name: 'gsd-popup' });
-    portRef.current = port;
+    unmounted.current = false;
 
-    port.onMessage.addListener((msg: PopupResponse) => {
-      if (msg.type === 'STATE_UPDATE') {
-        const { hasVault } = usePopupStore.getState();
-        if (hasVault !== false) {
-          if (hasVault === null) {
-            setHasVault(true);
-          }
-          setWalletState(msg.state);
+    function connect() {
+      if (unmounted.current) return;
+
+      const port = chrome.runtime.connect({ name: 'gsd-popup' });
+      portRef.current = port;
+
+      port.onMessage.addListener(handleMessage);
+
+      port.onDisconnect.addListener(() => {
+        portRef.current = null;
+        // Auto-reconnect after 1s unless unmounted
+        if (!unmounted.current) {
+          reconnectTimer.current = setTimeout(connect, 1000);
         }
-      } else if (msg.type === 'DIAGNOSTIC_EVENT') {
-        addDiagnosticEvent(msg.event);
-      } else if (msg.type === 'DIAGNOSTIC_EVENTS_BATCH') {
-        addDiagnosticEventsBatch(msg.events);
-      }
-    });
+      });
 
-    port.onDisconnect.addListener(() => {
-      portRef.current = null;
-    });
+      port.postMessage({ type: 'GET_STATE' });
+      port.postMessage({ type: 'GET_DIAGNOSTIC_BACKLOG' });
+    }
 
     // Check if wallets exist
     chrome.runtime.sendMessage(
       { type: 'CHECK_HAS_WALLETS' },
       (response) => {
         if (response?.type === 'HAS_WALLETS') {
-          setHasVault(response.exists as boolean);
+          const store = usePopupStore.getState();
+          store.setHasVault(response.exists as boolean);
           if (!response.exists) {
-            setStatus('uninitialized');
+            store.setStatus('uninitialized');
           }
         }
       },
@@ -60,11 +73,16 @@ export function useWalletConnection(): void {
       }
     });
 
-    port.postMessage({ type: 'GET_STATE' });
-    port.postMessage({ type: 'GET_DIAGNOSTIC_BACKLOG' });
+    connect();
 
     return () => {
-      port.disconnect();
+      unmounted.current = true;
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+      }
+      if (portRef.current) {
+        portRef.current.disconnect();
+      }
     };
-  }, [setWalletState, setHasVault, setStatus, addDiagnosticEvent, addDiagnosticEventsBatch]);
+  }, []);
 }
