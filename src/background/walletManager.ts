@@ -532,6 +532,8 @@ export async function stopWallet(): Promise<void> {
     if (activeWallet.stallCheckInterval) {
       clearInterval(activeWallet.stallCheckInterval);
     }
+    // Clear cached state so next init doesn't show stale balances
+    chrome.storage.session.remove('gsdLastState');
     try {
       await activeWallet.facade.stop();
     } catch (e) {
