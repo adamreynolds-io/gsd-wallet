@@ -380,16 +380,20 @@ function TokenRows({ label, balances }: { label: string; balances: Record<string
 
 /* ── Debug tabs ── */
 
-function SyncRow({ progress, percent }: { progress: SyncProgress; percent: number }) {
+function SyncRow({ state }: { state: SerializedWalletState }) {
+  const totalApplied = state.shielded.progress.applied + state.unshielded.progress.applied + state.dust.progress.applied;
+  const totalHighest = state.shielded.progress.highest + state.unshielded.progress.highest + state.dust.progress.highest;
+  const allConnected = state.shielded.progress.connected && state.unshielded.progress.connected && state.dust.progress.connected;
+  const percent = state.overallSyncPercent;
   return (
     <div className="mb-1.5">
       <div className="flex justify-between text-xs text-gray-500 mb-0.5">
-        <span>{progress.connected ? 'Connected' : 'Disconnected'}</span>
-        <span>{progress.applied} / {progress.highest} ({percent}%)</span>
+        <span>{allConnected ? 'Connected' : 'Disconnected'}</span>
+        <span>{totalApplied.toLocaleString()} / {totalHighest.toLocaleString()} ({percent}%)</span>
       </div>
       <div className="w-full h-1 bg-midnight-900 rounded-full overflow-hidden">
         <div
-          className={`h-full rounded-full transition-[width] duration-300 ${progress.connected ? 'bg-gradient-to-r from-accent-purple to-accent-magenta' : 'bg-gray-600'}`}
+          className={`h-full rounded-full transition-[width] duration-300 ${allConnected ? 'bg-gradient-to-r from-accent-purple to-accent-magenta' : 'bg-gray-600'}`}
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -415,7 +419,7 @@ function DustDebug({ state }: {
 }) {
   return (
     <div className="space-y-1">
-      <SyncRow progress={state.dust.progress} percent={state.dust.syncPercent} />
+      <SyncRow state={state} />
       <KV k="Balance" v={formatLargeNumber(BigInt(state.dust.balance), DUST_DENOMINATION)} />
       <KV k="Address" v={trunc(state.dust.address)} />
       <Divider label={`UTXOs (${state.unshielded.utxos.length})`} />
@@ -428,7 +432,7 @@ function ShieldedDebug({ state }: { state: SerializedWalletState }) {
   const entries = Object.entries(state.shielded.balances);
   return (
     <div className="space-y-1">
-      <SyncRow progress={state.shielded.progress} percent={state.shielded.syncPercent} />
+      <SyncRow state={state} />
       <KV k="Coins" v={String(state.shielded.coinCount)} />
       <Divider label="Balances" />
       {entries.length === 0 ? (
@@ -451,7 +455,7 @@ function UnshieldedDebug({ state }: {
   const unreg = state.unshielded.utxos.filter((u) => !u.registered);
   return (
     <div className="space-y-1">
-      <SyncRow progress={state.unshielded.progress} percent={state.unshielded.syncPercent} />
+      <SyncRow state={state} />
       <KV k="UTXOs" v={String(state.unshielded.utxos.length)} />
       <KV k="Registered" v={`${reg.length} / ${state.unshielded.utxos.length}`} />
       <KV k="Unregistered" v={String(unreg.length)} />
@@ -656,7 +660,7 @@ function SyncDetailRow({ label, color, progress, percent }: {
   progress: SyncProgress;
   percent: number;
 }) {
-  const done = progress.highest > 0 && progress.applied >= progress.highest;
+  const done = percent === 100 && progress.highest > 0 && progress.applied >= progress.highest;
   return (
     <div
       className="flex items-center justify-between text-xs"
