@@ -21,20 +21,29 @@ import type {
 import { NIGHT_TOKEN_ID } from '@shared/constants';
 import { getEnvironmentConfig } from '@shared/environments';
 import { emit } from './diagnosticLogger';
+import {
+  saveCheckpoint,
+  loadCheckpoint,
+  clearCheckpoint,
+} from './sdkCheckpoint';
 
 async function ensureOffscreenDocument(): Promise<void> {
   const contexts = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
   });
-  if (contexts.length > 0) return;
+  if (contexts.length > 0) {
+    emit('debug', 'sw', 'Offscreen document already exists');
+    return;
+  }
   try {
     await chrome.offscreen.createDocument({
       url: 'src/offscreen/offscreen.html',
       reasons: ['WORKERS' as chrome.offscreen.Reason],
       justification: 'Keep service worker alive during wallet sync via periodic ping',
     });
-  } catch {
-    // Already exists or not supported
+    emit('info', 'sw', 'Offscreen keepalive document created');
+  } catch (e) {
+    emit('error', 'sw', 'Failed to create offscreen document', { error: String(e) });
   }
 }
 
@@ -48,6 +57,7 @@ interface ActiveWallet {
   networkId: NetworkId.NetworkId;
   secretKeys: WalletSecretKeys;
   unshieldedKeystore: UnshieldedKeystore;
+  txHistoryStorage: InMemoryTransactionHistoryStorage;
   environment: Environment;
   accountIndex: number;
   walletName: string;
@@ -134,7 +144,7 @@ function serializeState(
     : false;
   const shieldedPercent = Number(sp.highestRelevantWalletIndex) === 0
     ? (sp.isConnected ? 100 : 0)
-    : (Number(sp.appliedIndex) / Number(sp.highestRelevantWalletIndex)) * 100;
+    : Math.min(100, (Number(sp.appliedIndex) / Number(sp.highestRelevantWalletIndex)) * 100);
 
   const up = facadeState.unshielded.progress;
   const unshieldedSynced = up.isConnected
@@ -142,7 +152,7 @@ function serializeState(
     : false;
   const unshieldedPercent = Number(up.highestTransactionId) === 0
     ? (up.isConnected ? 100 : 0)
-    : (Number(up.appliedId) / Number(up.highestTransactionId)) * 100;
+    : Math.min(100, (Number(up.appliedId) / Number(up.highestTransactionId)) * 100);
 
   const dp = facadeState.dust.progress;
   const dustSynced = dp.isConnected
@@ -152,7 +162,7 @@ function serializeState(
     : false;
   const dustPercent = Number(dp.highestRelevantWalletIndex) === 0
     ? (dp.isConnected ? 100 : 0)
-    : (Number(dp.appliedIndex) / Number(dp.highestRelevantWalletIndex)) * 100;
+    : Math.min(100, (Number(dp.appliedIndex) / Number(dp.highestRelevantWalletIndex)) * 100);
 
   const allConnected = sp.isConnected && up.isConnected && dp.isConnected;
   const totalApplied =
@@ -160,7 +170,7 @@ function serializeState(
   const totalHighest =
     Number(sp.highestRelevantWalletIndex) + Number(up.highestTransactionId) + Number(dp.highestRelevantWalletIndex);
   const overallSyncPercent = totalHighest > 0
-    ? Math.floor((totalApplied / totalHighest) * 100)
+    ? Math.min(100, Math.floor((totalApplied / totalHighest) * 100))
     : (allConnected ? 100 : 0);
   const reallySynced = facadeState.isSynced || (allConnected && shieldedSynced && unshieldedSynced && dustSynced);
 
@@ -316,6 +326,13 @@ async function initializeWalletCore(
     effectiveConfig.networkId,
   );
 
+  const checkpoint = await loadCheckpoint(environment, accountIndex);
+  const txHistoryStorage = checkpoint
+    ? InMemoryTransactionHistoryStorage.fromSerialized(
+        checkpoint.txHistoryState,
+      )
+    : new InMemoryTransactionHistoryStorage();
+
   const config = {
     networkId: effectiveConfig.networkId,
     indexerClientConnection: {
@@ -325,28 +342,97 @@ async function initializeWalletCore(
     provingServerUrl: new URL(effectiveConfig.provingServerUrl),
     relayURL: new URL(effectiveConfig.nodeWsUrl),
     costParameters: { feeBlocksMargin: 5 },
-    txHistoryStorage: new InMemoryTransactionHistoryStorage(),
+    txHistoryStorage,
   };
 
-  emit('info', 'wallet', 'Creating WalletFacade', { networkId: effectiveConfig.networkId, indexer: effectiveConfig.indexerHttpUrl, node: effectiveConfig.nodeWsUrl, prover: effectiveConfig.provingServerUrl });
-  const facadeT0 = Date.now();
-  const facade = await WalletFacade.init({
-    configuration: config,
-    shielded: (cfg) =>
-      ShieldedWallet(cfg).startWithSeed(
-        derivationResult.keys[Roles.Zswap],
-      ),
-    unshielded: (cfg) =>
-      UnshieldedWallet(cfg).startWithPublicKey(
-        PublicKey.fromKeyStore(unshieldedKeystore),
-      ),
-    dust: (cfg) =>
-      DustWallet(cfg).startWithSeed(
-        derivationResult.keys[Roles.Dust],
-        ledger.LedgerParameters.initialParameters().dust,
-      ),
-    provingService: () => makeServerProvingService({ provingServerUrl: new URL(effectiveConfig.provingServerUrl) }),
+  emit('info', 'wallet', 'Creating WalletFacade', {
+    networkId: effectiveConfig.networkId,
+    indexer: effectiveConfig.indexerHttpUrl,
+    node: effectiveConfig.nodeWsUrl,
+    prover: effectiveConfig.provingServerUrl,
+    restoringFromCheckpoint: checkpoint !== null,
   });
+  const facadeT0 = Date.now();
+  let facade: WalletFacade;
+
+  if (checkpoint) {
+    try {
+      emit('info', 'wallet', 'Restoring from checkpoint', {
+        savedAt: new Date(checkpoint.savedAt).toISOString(),
+        environment,
+      });
+      facade = await WalletFacade.init({
+        configuration: config,
+        shielded: (cfg) =>
+          ShieldedWallet(cfg).restore(checkpoint.shieldedState),
+        unshielded: (cfg) =>
+          UnshieldedWallet(cfg).restore(
+            checkpoint.unshieldedState,
+          ),
+        dust: (cfg) =>
+          DustWallet(cfg).restore(checkpoint.dustState),
+        provingService: () =>
+          makeServerProvingService({
+            provingServerUrl: new URL(
+              effectiveConfig.provingServerUrl,
+            ),
+          }),
+      });
+    } catch (restoreErr) {
+      emit(
+        'warn',
+        'wallet',
+        'Checkpoint restore failed, falling back to fresh sync',
+        { error: String(restoreErr) },
+      );
+      await clearCheckpoint(environment, accountIndex);
+      facade = await WalletFacade.init({
+        configuration: config,
+        shielded: (cfg) =>
+          ShieldedWallet(cfg).startWithSeed(
+            derivationResult.keys[Roles.Zswap],
+          ),
+        unshielded: (cfg) =>
+          UnshieldedWallet(cfg).startWithPublicKey(
+            PublicKey.fromKeyStore(unshieldedKeystore),
+          ),
+        dust: (cfg) =>
+          DustWallet(cfg).startWithSeed(
+            derivationResult.keys[Roles.Dust],
+            ledger.LedgerParameters.initialParameters().dust,
+          ),
+        provingService: () =>
+          makeServerProvingService({
+            provingServerUrl: new URL(
+              effectiveConfig.provingServerUrl,
+            ),
+          }),
+      });
+    }
+  } else {
+    facade = await WalletFacade.init({
+      configuration: config,
+      shielded: (cfg) =>
+        ShieldedWallet(cfg).startWithSeed(
+          derivationResult.keys[Roles.Zswap],
+        ),
+      unshielded: (cfg) =>
+        UnshieldedWallet(cfg).startWithPublicKey(
+          PublicKey.fromKeyStore(unshieldedKeystore),
+        ),
+      dust: (cfg) =>
+        DustWallet(cfg).startWithSeed(
+          derivationResult.keys[Roles.Dust],
+          ledger.LedgerParameters.initialParameters().dust,
+        ),
+      provingService: () =>
+        makeServerProvingService({
+          provingServerUrl: new URL(
+            effectiveConfig.provingServerUrl,
+          ),
+        }),
+    });
+  }
   emit('info', 'wallet', 'WalletFacade.init complete', undefined, Date.now() - facadeT0);
 
   // --- Phase 1: Subscribe + set activeWallet (fast, unblocks UI) ---
@@ -357,6 +443,9 @@ async function initializeWalletCore(
   let lastAppliedTotal = 0;
   let lastAdvanceTime = Date.now();
   let stallWarned = false;
+  let lastCheckpointTime = 0;
+  let wasSynced = false;
+  const CHECKPOINT_INTERVAL_MS = 30_000;
   const prevConnections = { shielded: false, unshielded: false, dust: false };
 
   const sub = facade.state().subscribe((facadeState) => {
@@ -444,6 +533,28 @@ async function initializeWalletCore(
       serialized.syncPhase = 'stalled';
     }
 
+    // Periodic checkpoint to IndexedDB for SW restart resilience
+    const cpNow = Date.now();
+    const syncedTransition =
+      facadeState.isSynced && !wasSynced;
+    if (
+      cpNow - lastCheckpointTime >= CHECKPOINT_INTERVAL_MS ||
+      syncedTransition
+    ) {
+      lastCheckpointTime = cpNow;
+      wasSynced = facadeState.isSynced;
+      saveCheckpoint(
+        facade,
+        txHistoryStorage,
+        environment,
+        accountIndex,
+      ).catch((err) => {
+        emit('warn', 'storage', 'Checkpoint failed', {
+          error: String(err),
+        });
+      });
+    }
+
     chrome.storage.session.set({ gsdLastState: serialized });
     for (const listener of stateListeners) {
       listener(serialized);
@@ -481,6 +592,7 @@ async function initializeWalletCore(
     networkId: effectiveConfig.networkId,
     secretKeys: { shieldedSecretKeys, dustSecretKey },
     unshieldedKeystore,
+    txHistoryStorage,
     environment,
     accountIndex,
     walletName,
@@ -535,6 +647,19 @@ export async function stopWallet(): Promise<void> {
     activeWallet.subscription.unsubscribe();
     if (activeWallet.stallCheckInterval) {
       clearInterval(activeWallet.stallCheckInterval);
+    }
+    // Save final checkpoint before stopping
+    try {
+      await saveCheckpoint(
+        activeWallet.facade,
+        activeWallet.txHistoryStorage,
+        activeWallet.environment,
+        activeWallet.accountIndex,
+      );
+    } catch (e) {
+      emit('warn', 'storage', 'Final checkpoint save failed', {
+        error: String(e),
+      });
     }
     // Clear cached state so next init doesn't show stale balances
     chrome.storage.session.remove('gsdLastState');
