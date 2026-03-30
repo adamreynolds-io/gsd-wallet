@@ -72,6 +72,7 @@ export type PopupResponse =
   | { type: 'TX_HISTORY'; entries: TxHistoryEntry[] }
   | { type: 'DIAGNOSTIC_EVENT'; event: DiagnosticEvent }
   | { type: 'DIAGNOSTIC_EVENTS_BATCH'; events: DiagnosticEvent[] }
+  | { type: 'UPDATE_AVAILABLE'; currentVersion: string; latestVersion: string; releaseUrl: string; downloadUrl: string }
   | { type: 'ERROR'; error: string };
 
 export interface TransferRequest {

@@ -16,6 +16,12 @@ function handleMessage(msg: PopupResponse): void {
     store.addDiagnosticEvent(msg.event);
   } else if (msg.type === 'DIAGNOSTIC_EVENTS_BATCH') {
     store.addDiagnosticEventsBatch(msg.events);
+  } else if (msg.type === 'UPDATE_AVAILABLE') {
+    store.setUpdateAvailable({
+      latestVersion: msg.latestVersion,
+      releaseUrl: msg.releaseUrl,
+      downloadUrl: msg.downloadUrl,
+    });
   }
 }
 

@@ -29,6 +29,8 @@ interface PopupState {
   diagnosticLevelFilter: Record<DiagnosticLevel, boolean>;
   diagnosticCategoryFilter: Record<DiagnosticCategory, boolean>;
 
+  updateAvailable: { latestVersion: string; releaseUrl: string; downloadUrl: string } | null;
+
   setStatus: (status: WalletStatus) => void;
   setHasVault: (hasVault: boolean) => void;
   setWalletState: (state: SerializedWalletState) => void;
@@ -46,6 +48,7 @@ interface PopupState {
   setDiagnosticLevel: (level: DiagnosticLevel, on: boolean) => void;
   setDiagnosticCategory: (category: DiagnosticCategory, on: boolean) => void;
   clearDiagnosticEvents: () => void;
+  setUpdateAvailable: (info: { latestVersion: string; releaseUrl: string; downloadUrl: string }) => void;
 }
 
 export const usePopupStore = create<PopupState>((set) => ({
@@ -59,6 +62,8 @@ export const usePopupStore = create<PopupState>((set) => ({
   diagnosticEvents: [],
   diagnosticLevelFilter: makeFilterRecord(DIAGNOSTIC_LEVELS),
   diagnosticCategoryFilter: makeFilterRecord(DIAGNOSTIC_CATEGORIES),
+
+  updateAvailable: null,
 
   setStatus: (status) => set({ status }),
   setHasVault: (hasVault) => set({ hasVault }),
@@ -99,4 +104,6 @@ export const usePopupStore = create<PopupState>((set) => ({
     })),
 
   clearDiagnosticEvents: () => set({ diagnosticEvents: [] }),
+
+  setUpdateAvailable: (info) => set({ updateAvailable: info }),
 }));

@@ -83,6 +83,7 @@ export function Header() {
   }
 
   return (
+    <>
     <header className="flex items-center justify-between px-4 py-2 bg-midnight-800 border-b border-midnight-500 shrink-0">
       <div className="flex items-center gap-2">
         <div className="flex items-center gap-1.5">
@@ -197,6 +198,29 @@ export function Header() {
         )}
       </div>
     </header>
+    <UpdateBanner />
+    </>
+  );
+}
+
+function UpdateBanner() {
+  const update = usePopupStore((s) => s.updateAvailable);
+  if (!update) return null;
+
+  return (
+    <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900/60 border-b border-amber-600/40 shrink-0">
+      <span className="text-xs text-amber-200">
+        Update available: <strong>v{update.latestVersion}</strong>
+      </span>
+      <a
+        href={update.downloadUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs text-amber-200 underline hover:text-white"
+      >
+        Download
+      </a>
+    </div>
   );
 }
 
