@@ -28,6 +28,7 @@ export function useWalletConnection(): void {
 
     function connect() {
       if (unmounted.current) return;
+      const store = usePopupStore.getState();
 
       const port = chrome.runtime.connect({ name: 'gsd-popup' });
       portRef.current = port;
@@ -36,10 +37,33 @@ export function useWalletConnection(): void {
 
       port.onDisconnect.addListener(() => {
         portRef.current = null;
-        // Auto-reconnect after 1s unless unmounted
+        store.addDiagnosticEvent({
+          id: Date.now(),
+          timestamp: Date.now(),
+          level: 'warn',
+          category: 'popup',
+          message: 'Port disconnected from service worker',
+        });
+        // Auto-reconnect immediately unless unmounted
         if (!unmounted.current) {
-          reconnectTimer.current = setTimeout(connect, 1000);
+          store.addDiagnosticEvent({
+            id: Date.now(),
+            timestamp: Date.now(),
+            level: 'info',
+            category: 'popup',
+            message: 'Reconnecting to service worker...',
+          });
+          // Reconnect on next tick — keeps the SW alive by maintaining a port
+          reconnectTimer.current = setTimeout(connect, 0);
         }
+      });
+
+      store.addDiagnosticEvent({
+        id: Date.now(),
+        timestamp: Date.now(),
+        level: 'info',
+        category: 'popup',
+        message: 'Connected to service worker',
       });
 
       port.postMessage({ type: 'GET_STATE' });
