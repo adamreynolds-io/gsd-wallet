@@ -47,6 +47,13 @@ export function useWalletConnection(): void {
       },
     );
 
+    // Read stored environment so the UI shows the correct network before state arrives
+    chrome.storage.session.get('gsdEnvironment').then((result) => {
+      if (result['gsdEnvironment']) {
+        usePopupStore.getState().setEnvironment(result['gsdEnvironment']);
+      }
+    });
+
     port.postMessage({ type: 'GET_STATE' });
     port.postMessage({ type: 'GET_DIAGNOSTIC_BACKLOG' });
 

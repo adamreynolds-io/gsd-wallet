@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePopupStore } from '@popup/store/popupStore';
 import { ENVIRONMENT_OPTIONS } from '@shared/environments';
-import type { Environment } from '@shared/types';
+import type { Environment, SerializedWalletState } from '@shared/types';
 
 const LOCALNET_WALLETS = [0, 1, 2, 3];
 
@@ -95,15 +95,18 @@ export function Header() {
           <h1 className="text-lg font-bold text-white tracking-wide">Midnight GSD</h1>
         </div>
         {isActive && (
-          <select
-            className="text-xs bg-midnight-600 text-gray-300 border border-midnight-400 rounded px-1.5 py-0.5 cursor-pointer focus:outline-none focus:border-accent-purple"
-            value={currentEnv}
-            onChange={(e) => handleNetworkSwitch(e.target.value as Environment)}
-          >
-            {ENVIRONMENT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          <>
+            <select
+              className="text-xs bg-midnight-600 text-gray-300 border border-midnight-400 rounded px-1.5 py-0.5 cursor-pointer focus:outline-none focus:border-accent-purple"
+              value={currentEnv}
+              onChange={(e) => handleNetworkSwitch(e.target.value as Environment)}
+            >
+              {ENVIRONMENT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <SyncStatusBadge walletState={walletState} />
+          </>
         )}
       </div>
 
@@ -196,6 +199,27 @@ function ExpandIcon() {
       <line x1="21" y1="3" x2="14" y2="10" />
       <line x1="3" y1="21" x2="10" y2="14" />
     </svg>
+  );
+}
+
+const PHASE_BADGE: Record<string, { label: string; color: string }> = {
+  connecting: { label: 'Connecting', color: 'text-amber-400' },
+  'catching-up': { label: 'Syncing', color: 'text-blue-400' },
+  'nearly-synced': { label: 'Almost synced', color: 'text-cyan-400' },
+  synced: { label: 'Synced', color: 'text-green-400' },
+  stalled: { label: 'Stalled', color: 'text-red-400' },
+};
+
+function SyncStatusBadge({ walletState }: { walletState: SerializedWalletState | null }) {
+  if (!walletState) return null;
+  const phase = walletState.syncPhase;
+  const badge = PHASE_BADGE[phase];
+  if (!badge) return null;
+  const showPercent = phase === 'catching-up' || phase === 'nearly-synced' || phase === 'stalled';
+  return (
+    <span className={`text-xs ${badge.color}`}>
+      {badge.label}{showPercent ? ` ${walletState.overallSyncPercent}%` : ''}
+    </span>
   );
 }
 

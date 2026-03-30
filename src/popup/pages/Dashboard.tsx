@@ -105,10 +105,11 @@ export function Dashboard() {
     });
   }, [walletState?.status]);
 
+  const storeEnv = usePopupStore((s) => s.environment);
   const EMPTY_PROGRESS = { applied: 0, highest: 0, highestIndex: 0, connected: false };
   const emptyState: SerializedWalletState = {
     status: 'initializing',
-    environment: 'dev',
+    environment: storeEnv,
     activeAccountIndex: 0,
     shielded: { address: '', balances: {}, coinCount: 0, syncPercent: 0, progress: EMPTY_PROGRESS },
     unshielded: { address: '', balances: {}, utxos: [], syncPercent: 0, progress: EMPTY_PROGRESS },

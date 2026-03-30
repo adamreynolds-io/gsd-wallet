@@ -273,7 +273,10 @@ const ICONS = {
 } as const;
 
 function downloadLogs(events: DiagnosticEvent[]): void {
-  const ndjson = events.map((e) => JSON.stringify(e)).join('\n');
+  const ndjson = events.map((e) => JSON.stringify({
+    ...e,
+    time: new Date(e.timestamp).toISOString(),
+  })).join('\n');
   const blob = new Blob([ndjson], { type: 'application/x-ndjson' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
