@@ -3,7 +3,11 @@ import type { SerializedWalletState } from '@shared/types';
 import { executeTransfer } from '@core/transfer';
 import { executeDustRegistration } from '@core/dustRegistration';
 import { executeDustDeregistration } from '@core/dustDeregistration';
-import { addTxHistoryEntry, getTxHistory } from '@shared/storage';
+import {
+  addTxHistoryEntry,
+  getTxHistory,
+  deleteAllSdkState,
+} from '@shared/storage';
 import { handleApiCall } from './connectedApiHandler';
 import * as stateManager from './stateManager';
 import * as walletManager from './walletManager';
@@ -308,6 +312,7 @@ async function handlePopupMessage(
       case 'CLEAR_ALL': {
         await walletManager.stopWallet();
         await stateManager.clearAll();
+        await deleteAllSdkState();
         break;
       }
 

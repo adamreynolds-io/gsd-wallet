@@ -4,7 +4,15 @@ import { crx } from '@crxjs/vite-plugin';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import { resolve } from 'path';
+import { readFileSync } from 'fs';
 import manifest from './manifest.json';
+
+const facadePkg = JSON.parse(
+  readFileSync(
+    resolve(__dirname, 'node_modules/@midnight-ntwrk/wallet-sdk-facade/package.json'),
+    'utf-8',
+  ),
+) as { version: string };
 
 export default defineConfig({
   plugins: [wasm(), topLevelAwait(), react(), crx({ manifest })],
@@ -20,6 +28,7 @@ export default defineConfig({
   },
   define: {
     'global': 'globalThis',
+    '__SDK_FACADE_VERSION__': JSON.stringify(facadePkg.version),
   },
   build: {
     target: 'es2022',

@@ -4,10 +4,12 @@ import type {
   PermissionRecord,
   TxHistoryEntry,
   WalletStore,
+  PersistedSdkState,
+  Environment,
 } from './types';
 
 const DB_NAME = 'gsd-wallet';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 type GsdDB = IDBPDatabase;
 
@@ -16,22 +18,19 @@ let dbPromise: Promise<GsdDB> | undefined;
 function getDb(): Promise<GsdDB> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains('vault')) {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
           db.createObjectStore('vault');
-        }
-        if (!db.objectStoreNames.contains('permissions')) {
           db.createObjectStore('permissions', { keyPath: 'origin' });
-        }
-        if (!db.objectStoreNames.contains('txHistory')) {
-          const store = db.createObjectStore('txHistory', {
+          const txStore = db.createObjectStore('txHistory', {
             keyPath: 'txHash',
           });
-          store.createIndex('byAccount', 'accountIndex');
-          store.createIndex('byTimestamp', 'timestamp');
-        }
-        if (!db.objectStoreNames.contains('settings')) {
+          txStore.createIndex('byAccount', 'accountIndex');
+          txStore.createIndex('byTimestamp', 'timestamp');
           db.createObjectStore('settings');
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore('sdkState', { keyPath: 'key' });
         }
       },
     });
@@ -141,4 +140,42 @@ export async function saveSetting<T>(
 ): Promise<void> {
   const db = await getDb();
   await db.put('settings', value, key);
+}
+
+// --- SDK State (checkpoint persistence) ---
+
+function sdkStateKey(
+  environment: Environment,
+  accountIndex: number,
+): string {
+  return `${environment}:${accountIndex}`;
+}
+
+export async function getSdkState(
+  environment: Environment,
+  accountIndex: number,
+): Promise<PersistedSdkState | undefined> {
+  const db = await getDb();
+  return db.get('sdkState', sdkStateKey(environment, accountIndex)) as
+    Promise<PersistedSdkState | undefined>;
+}
+
+export async function saveSdkState(
+  state: PersistedSdkState,
+): Promise<void> {
+  const db = await getDb();
+  await db.put('sdkState', state);
+}
+
+export async function deleteSdkState(
+  environment: Environment,
+  accountIndex: number,
+): Promise<void> {
+  const db = await getDb();
+  await db.delete('sdkState', sdkStateKey(environment, accountIndex));
+}
+
+export async function deleteAllSdkState(): Promise<void> {
+  const db = await getDb();
+  await db.clear('sdkState');
 }

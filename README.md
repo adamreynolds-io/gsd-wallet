@@ -70,11 +70,13 @@ The wallet syncs three subsystems independently:
 | **Unshielded** | Only your transactions | Public — indexer can filter by address without privacy risk |
 | **Dust** | All dust events on chain | Same privacy model as shielded — local filtering |
 
-**First sync is slow on mainnet** (~87k shielded + ~87k dust events). Subsequent opens restore from the SDK's cached state and only sync the delta. The unshielded subsystem syncs instantly because it only streams your transactions.
+**First sync is slow on mainnet** (~87k shielded + ~87k dust events). The unshielded subsystem syncs instantly because it only streams your transactions.
+
+**Persistent SDK storage** ensures sync survives Chrome's service worker lifecycle. The wallet serializes SDK state to IndexedDB every 30 seconds during sync. When Chrome kills the service worker (after ~30s idle), the next restart restores from the last checkpoint and continues syncing — no progress is lost. Full mainnet sync completes across multiple SW restarts without the user needing to keep the popup open.
 
 The two-phase initialization ensures the UI is never blocked:
-1. **Phase 1 (fast):** Create facade, subscribe to state, emit initial zero-progress state to UI
-2. **Phase 2 (background):** `facade.start()` connects to indexer/node, sync begins; state updates flow to UI progressively
+1. **Phase 1 (fast):** Load checkpoint from IndexedDB (if available), create facade with restored or fresh state, subscribe to state, emit initial state to UI
+2. **Phase 2 (background):** `facade.start()` connects to indexer/node, sync resumes from checkpoint offset; state updates flow to UI progressively
 
 ## DApp connector
 
@@ -120,7 +122,7 @@ Intentional trade-offs for developer convenience:
 ## Known issues
 
 - **Mainnet sync stalls** — The mainnet RPC node (`wss://rpc.mainnet.midnight.network`) periodically drops WebSocket connections with `1000: Normal Closure`. The `@polkadot/api` SDK reconnects automatically but sync can stall. The wallet detects this after 30s and shows "Stalled". Closing and reopening the popup triggers a fresh connection. This is a mainnet infrastructure issue, not a wallet bug.
-- **First mainnet sync takes minutes** — ~87k shielded + ~87k dust events must be downloaded and processed client-side. This is by design for privacy (see "How sync works" above).
+- **First mainnet sync takes minutes** — ~87k shielded + ~87k dust events must be downloaded and processed client-side. This is by design for privacy (see "How sync works" above). Persistent SDK storage ensures sync completes across service worker restarts.
 
 ## Documentation
 
@@ -142,7 +144,7 @@ Intentional trade-offs for developer convenience:
 |---|---|
 | Midnight SDK | `wallet-sdk-facade`, `wallet-sdk-hd`, `ledger-v8`, `dapp-connector-api` |
 | UI | React 18, React Router 7, Zustand 5, TailwindCSS 3 |
-| Storage | `idb` (IndexedDB), RxJS 7 |
+| Storage | `idb` (IndexedDB — persistent SDK state, vault, tx history, permissions), RxJS 7 |
 | Build | Vite 6, `@crxjs/vite-plugin`, TypeScript 5.9 |
 | Crypto | `@scure/bip39` |
 

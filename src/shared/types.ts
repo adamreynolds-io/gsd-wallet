@@ -108,6 +108,18 @@ export interface SerializedWalletState {
   activeWalletName: string;
 }
 
+export interface PersistedSdkState {
+  key: string;
+  environment: Environment;
+  accountIndex: number;
+  shieldedState: string;
+  unshieldedState: string;
+  dustState: string;
+  txHistoryState: string;
+  savedAt: number;
+  sdkVersion: string;
+}
+
 export interface PermissionRecord {
   origin: string;
   networkId: string;

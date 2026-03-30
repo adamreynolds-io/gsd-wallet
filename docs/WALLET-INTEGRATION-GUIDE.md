@@ -22,7 +22,7 @@ Before writing code, determine your integration target:
 
 | Platform | Polyfills needed | Storage | DApp Connector | WASM CSP |
 |----------|-----------------|---------|----------------|----------|
-| **Chrome Extension (MV3)** | Buffer, assert, DOM shims | IndexedDB + chrome.storage.session | Yes (content script + inpage injection) | `wasm-unsafe-eval` in manifest |
+| **Chrome Extension (MV3)** | Buffer, assert, DOM shims | IndexedDB (persistent SDK state + app data) + chrome.storage.session (transient) | Yes (content script + inpage injection) | `wasm-unsafe-eval` in manifest |
 | **Electron** | None (has Node.js) | Filesystem or IndexedDB | Optional (BrowserWindow injection) | None (Node.js context) |
 | **Node.js (headless)** | None | Filesystem | No | None |
 | **React Native** | **NOT SUPPORTED** | — | — | — |
@@ -227,51 +227,68 @@ These must be at the TOP of your service worker entry point, before any SDK impo
 
 Without `wasm-unsafe-eval`, the ledger WASM module will fail to instantiate with no useful error message.
 
-#### Service worker keepalive
+#### Service worker lifecycle and persistent SDK storage
 
 Chrome terminates idle service workers after ~30 seconds. WebSocket connections (used by `@polkadot/api` for node/indexer communication) do NOT count as activity — Chrome will kill the SW even with active WebSockets.
 
-**Alarms alone are insufficient.** Chrome's minimum alarm period is 30 seconds, and the alarm handler runs too fast to extend the SW lifetime meaningfully.
+**What does NOT keep the SW alive:**
+- Offscreen document with persistent port — tested: SW still dies at ~60s
+- `chrome.alarms` — minimum 30s period, handler runs too fast to extend lifetime
+- `setInterval` in SW — does not prevent termination
+- `chrome.storage.session` writes — periodic writes don't prevent kills
+- Active WebSocket connections — Chrome ignores these for SW lifecycle
 
-**Solution: Offscreen document with persistent port.** Create an offscreen document that holds a persistent port to the service worker. Chrome keeps the SW alive as long as a connected port exists:
+**What DOES keep the SW alive:**
+- Popup or full-tab extension page open with active port
+- DevTools inspector attached (dev-only, not a user solution)
+
+**The real fix: Persistent SDK storage.** Instead of fighting the SW lifecycle, persist the SDK's wallet state to IndexedDB so each restart resumes from the last checkpoint. The SDK provides serialization/restore on all three wallet types:
 
 ```typescript
-// offscreen.ts — persistent keepalive port
-function connectKeepalive() {
-  const port = chrome.runtime.connect({ name: 'gsd-keepalive' });
-  port.onDisconnect.addListener(() => {
-    // SW died — reconnect to force restart
-    setTimeout(connectKeepalive, 500);
-  });
-}
-connectKeepalive();
+// Serialize — call periodically during sync (e.g. every 30s)
+const [shielded, unshielded, dust] = await Promise.all([
+  facade.shielded.serializeState(),   // Returns string
+  facade.unshielded.serializeState(), // Returns string
+  facade.dust.serializeState(),       // Returns string
+]);
+const txHistory = txHistoryStorage.serialize(); // Also string
+
+// Persist to IndexedDB (keyed by environment + account)
+await db.put('sdkState', { shieldedState, unshieldedState, dustState, txHistory, savedAt, sdkVersion });
 ```
 
 ```typescript
-// messageRouter.ts — accept the keepalive port without broadcasting
-if (port.name === 'gsd-keepalive') {
-  return; // Just hold it open
+// Restore — on wallet initialization, check for checkpoint first
+const checkpoint = await db.get('sdkState', key);
+
+if (checkpoint) {
+  const txHistoryStorage = InMemoryTransactionHistoryStorage.fromSerialized(checkpoint.txHistory);
+  const facade = await WalletFacade.init({
+    configuration: { ...config, txHistoryStorage },
+    shielded: (cfg) => ShieldedWallet(cfg).restore(checkpoint.shieldedState),
+    unshielded: (cfg) => UnshieldedWallet(cfg).restore(checkpoint.unshieldedState),
+    dust: (cfg) => DustWallet(cfg).restore(checkpoint.dustState),
+    provingService: () => makeServerProvingService({ ... }),
+  });
+} else {
+  // Fresh init with startWithSeed/startWithPublicKey (existing code)
 }
 ```
 
-```typescript
-// walletManager.ts — create the offscreen document when wallet starts
-async function ensureOffscreenDocument(): Promise<void> {
-  const contexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
-  });
-  if (contexts.length > 0) return;
-  await chrome.offscreen.createDocument({
-    url: 'src/offscreen/offscreen.html',
-    reasons: ['WORKERS' as chrome.offscreen.Reason],
-    justification: 'Keep service worker alive during wallet sync',
-  });
-}
-```
+**Checkpointing strategy:**
+- Save every 30 seconds during sync (throttled, fire-and-forget)
+- Save when `isSynced` transitions to `true`
+- Save before `facade.stop()` on wallet lock/shutdown
+- Never block the UI or state emission on checkpoint writes
+- Store the SDK package version — discard checkpoints after SDK upgrades
 
-Without this, mainnet sync (~87k shielded + ~87k dust events, ~6 minutes) will never complete — Chrome kills the SW every ~60 seconds and the SDK restarts from scratch each time.
+**Error handling:** Wrap restore in try/catch. If deserialization fails (corrupt data, schema change), clear the checkpoint and fall back to fresh sync. Checkpoint writes are best-effort — failures are logged but never crash the wallet.
 
-**Reference:** `gsd-wallet/src/offscreen/offscreen.ts`, `gsd-wallet/src/background/walletManager.ts:ensureOffscreenDocument`
+**Scoping:** Key checkpoints by `${environment}:${accountIndex}` so each wallet/network combination has independent state.
+
+**Tested on mainnet:** With ~87k shielded + ~87k dust events, the wallet completes full sync across multiple SW restarts (Chrome kills the SW every ~60s), each time resuming from the last 30-second checkpoint. Without persistent storage, this sync never completes.
+
+**Reference:** `gsd-wallet/src/background/sdkCheckpoint.ts`, `gsd-wallet/src/background/walletManager.ts:initializeWalletCore`, `gsd-wallet/src/shared/storage.ts`
 
 #### Popup height limit
 
@@ -746,8 +763,8 @@ On mainnet with ~87k shielded and ~87k dust events, first sync takes several min
 | Address shows as empty string | `MidnightBech32m.encode()` threw (address not yet synced) | Wrap in try-catch, show placeholder |
 | UTXO hash "Not found in indexer" | `intentHash` is not a transaction hash | Don't use intent hash as indexer lookup key |
 | Popup scrolls past bottom | Chrome enforces viewport height limit (~600px) | Cap popup height; offer "Open in Full Tab" |
-| Service worker dies mid-sync | Chrome kills idle SWs after ~30s; WebSockets don't count as activity | Use offscreen document with persistent port (not alarms alone) |
-| Sync restarts from 0 on every SW restart | `InMemoryTransactionHistoryStorage` loses all state | Offscreen keepalive prevents kills; persistent SDK storage adapter is the long-term fix |
+| Service worker dies mid-sync | Chrome kills idle SWs after ~30s; WebSockets don't count as activity | Persist SDK state to IndexedDB; restore from checkpoint on restart (see section 4) |
+| Sync restarts from 0 on every SW restart | `InMemoryTransactionHistoryStorage` and wallet state are in-memory only | Implement persistent SDK storage with `serializeState()`/`restore()` and `InMemoryTransactionHistoryStorage.serialize()`/`fromSerialized()` |
 | Popup shows stale data after close/reopen | Port message delivery unreliable in MV3 | Use `chrome.storage.onChanged` for live updates instead of port broadcasts |
 | Sync percentage inflated (61% shown, actual 43%) | Averaging per-wallet percentages equally | Use `totalApplied / totalHighest` across all wallets |
 | API call hangs after SW restart | `autoUnlock` reinitializes facade while API handler uses old ref | Gate API handlers with `waitForReady()` before using facade |
@@ -781,7 +798,7 @@ What the existing Midnight documentation covers vs what you actually need:
 | **Token type ID model** | Design.md (briefly) | utxo.mdx (conceptual) | **Partial** — theory but no practical guidance |
 | **React Native limitations** | — | — | **Gap** — no explicit statement of non-support |
 | **Chrome popup constraints** | — | — | **Gap** — 600px limit not documented |
-| **Keepalive patterns** | — | — | **Gap** — SW lifecycle not addressed |
+| **SW lifecycle & persistent storage** | — | — | **Addressed here** — checkpoint pattern with `serializeState()`/`restore()` |
 
 ---
 
@@ -792,7 +809,9 @@ The GSD Wallet provides working implementations of every pattern in this guide:
 | Pattern | File | Key function/section |
 |---------|------|---------------------|
 | Service worker polyfills | `src/background/index.ts` | Lines 1-38 |
-| Facade initialization (two-phase) | `src/background/walletManager.ts` | `initializeWalletCore()` — Phase 1: subscribe + emit initial state; Phase 2: `facade.start()` in background |
+| Facade initialization (two-phase, with checkpoint restore) | `src/background/walletManager.ts` | `initializeWalletCore()` — loads checkpoint, restores or fresh init, Phase 2: `facade.start()` in background |
+| Persistent SDK storage (checkpoint) | `src/background/sdkCheckpoint.ts` | `saveCheckpoint()`, `loadCheckpoint()`, `clearCheckpoint()` — IndexedDB-backed state persistence |
+| IndexedDB schema (v2, with sdkState store) | `src/shared/storage.ts` | `getSdkState()`, `saveSdkState()`, `deleteSdkState()`, `deleteAllSdkState()` |
 | SW race condition guard | `src/background/walletManager.ts` | `waitForReady()` |
 | State serialization | `src/background/walletManager.ts` | `serializeState()` |
 | Per-wallet sync progress | `src/popup/pages/Dashboard.tsx` | `SyncDetailRow` — always-visible rows showing applied/total per wallet |
