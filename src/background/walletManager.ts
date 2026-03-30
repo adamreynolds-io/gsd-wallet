@@ -7,7 +7,7 @@ import {
   type UnshieldedKeystore,
 } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
-import { HDWallet, Roles } from '@midnight-ntwrk/wallet-sdk-hd';
+import { HDWallet, Roles, type Role } from '@midnight-ntwrk/wallet-sdk-hd';
 import { ShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
 import { DustWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
 import { makeServerProvingService } from '@midnight-ntwrk/wallet-sdk-capabilities';
@@ -297,32 +297,36 @@ async function initializeWalletCore(
 
   emit('debug', 'wallet', 'Deriving HD keys');
   const hdWallet = HDWallet.fromSeed(seed);
+  seed.fill(0);
   if (hdWallet.type !== 'seedOk') {
     emit('error', 'wallet', 'HDWallet.fromSeed failed', { type: hdWallet.type });
     throw new Error('Failed to initialize HDWallet from seed');
   }
 
-  const derivationResult = hdWallet.hdWallet
-    .selectAccount(accountIndex)
-    .selectRoles([Roles.Zswap, Roles.NightExternal, Roles.Dust])
-    .deriveKeysAt(0);
-
-  if (derivationResult.type !== 'keysDerived') {
-    emit('error', 'wallet', 'Key derivation failed', { type: derivationResult.type });
-    throw new Error('Failed to derive keys from HD wallet');
-  }
+  const account = hdWallet.hdWallet.selectAccount(accountIndex);
+  const deriveRoleKey = (role: Role, index = 0): Uint8Array => {
+    const result = account.selectRole(role).deriveKeyAt(index);
+    if (result.type === 'keyDerived') return result.key;
+    if (index >= 5) throw new Error(`Key derivation failed for role ${role}`);
+    return deriveRoleKey(role, index + 1);
+  };
+  const derivedKeys = {
+    [Roles.Zswap]: deriveRoleKey(Roles.Zswap),
+    [Roles.NightExternal]: deriveRoleKey(Roles.NightExternal),
+    [Roles.Dust]: deriveRoleKey(Roles.Dust),
+  };
 
   hdWallet.hdWallet.clear();
   emit('debug', 'wallet', 'Keys derived, creating secret keys');
 
   const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(
-    derivationResult.keys[Roles.Zswap],
+    derivedKeys[Roles.Zswap],
   );
   const dustSecretKey = ledger.DustSecretKey.fromSeed(
-    derivationResult.keys[Roles.Dust],
+    derivedKeys[Roles.Dust],
   );
   const unshieldedKeystore = createKeystore(
-    derivationResult.keys[Roles.NightExternal],
+    derivedKeys[Roles.NightExternal],
     effectiveConfig.networkId,
   );
 
@@ -390,7 +394,7 @@ async function initializeWalletCore(
         configuration: config,
         shielded: (cfg) =>
           ShieldedWallet(cfg).startWithSeed(
-            derivationResult.keys[Roles.Zswap],
+            derivedKeys[Roles.Zswap],
           ),
         unshielded: (cfg) =>
           UnshieldedWallet(cfg).startWithPublicKey(
@@ -398,7 +402,7 @@ async function initializeWalletCore(
           ),
         dust: (cfg) =>
           DustWallet(cfg).startWithSeed(
-            derivationResult.keys[Roles.Dust],
+            derivedKeys[Roles.Dust],
             ledger.LedgerParameters.initialParameters().dust,
           ),
         provingService: () =>
@@ -414,7 +418,7 @@ async function initializeWalletCore(
       configuration: config,
       shielded: (cfg) =>
         ShieldedWallet(cfg).startWithSeed(
-          derivationResult.keys[Roles.Zswap],
+          derivedKeys[Roles.Zswap],
         ),
       unshielded: (cfg) =>
         UnshieldedWallet(cfg).startWithPublicKey(
@@ -422,7 +426,7 @@ async function initializeWalletCore(
         ),
       dust: (cfg) =>
         DustWallet(cfg).startWithSeed(
-          derivationResult.keys[Roles.Dust],
+          derivedKeys[Roles.Dust],
           ledger.LedgerParameters.initialParameters().dust,
         ),
       provingService: () =>

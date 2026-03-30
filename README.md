@@ -24,14 +24,14 @@ Chrome extension wallet for dApp developers building on the [Midnight](https://m
 ### Sync & diagnostics
 
 - **Non-blocking sync** — UI renders immediately while the wallet syncs in the background; no blank screens or loading spinners
-- **Per-wallet sync progress** — always-visible Shielded/Unshielded/Dust rows showing applied/total event counts with overall progress bar
+- **Per-wallet sync progress** — Shielded/Unshielded/Dust progress shown in the status bar and debug tabs
 - **Sync phase in header** — current phase (Connecting/Syncing X%/Stalled/Synced) displayed next to the network selector
 - **Stall detection** — automatic detection when sync stops advancing for 30s (e.g., after WebSocket disconnect); shown as "Stalled" with warning diagnostic
 - **SDK console interception** — captures `@polkadot/api` RPC-CORE errors, WebSocket disconnects, and reconnection events that normally only appear in the browser console
 - **Persistent diagnostics** — 2000-event ring buffer persisted to `chrome.storage.session`; survives service worker restarts (Chrome kills idle SWs after ~30s)
 - **Filterable event stream** — filter by level (DBG/INF/WRN/ERR) and category (SW/Wallet/State/Sync/SDK/DApp/API/Pop/Tx/Idx/Sto/Err)
 - **Log export** — download all diagnostic events as NDJSON with ISO timestamps for sharing in bug reports
-- **Status bar** — persistent bottom bar showing the latest diagnostic event with timestamp and category
+- **Status bar** — persistent bottom bar showing connection status, overall sync progress, and per-wallet sync detail
 - **Debug tabs** — real-time sync progress, UTXO inspection, token balances per subsystem (Dust/Shielded/Unshielded), transaction history
 - **Built-in explorer** — query the v4 indexer for transaction, block, and contract details
 

@@ -14,7 +14,7 @@ type Step =
 
 export function Onboarding() {
   const [step, setStep] = useState<Step>('network');
-  const [environment, setEnvironment] = useState<Environment>('dev');
+  const [environment, setEnvironment] = useState<Environment | ''>('');
   const [seedType, setSeedType] = useState<SeedType>('mnemonic');
   const [seedWords, setSeedWords] = useState<string[]>([]);
   const [seedInput, setSeedInput] = useState('');
@@ -32,23 +32,24 @@ export function Onboarding() {
     words: string[];
     seed: Uint8Array;
   }> {
-    const { generateMnemonic, mnemonicToSeedSync } = await import('@scure/bip39');
+    const { generateMnemonic, mnemonicToEntropy } = await import('@scure/bip39');
     const { wordlist } = await import('@scure/bip39/wordlists/english.js');
     const mnemonic = generateMnemonic(wordlist, 256);
     const words = mnemonic.split(' ');
-    const seed = mnemonicToSeedSync(mnemonic).slice(0, 32);
-    return { words, seed: new Uint8Array(seed) };
+    const entropy = mnemonicToEntropy(mnemonic, wordlist);
+    return { words, seed: new Uint8Array(entropy.slice(0, 32)) };
   }
 
   async function parseSeedInput(): Promise<Uint8Array> {
     if (seedType === 'mnemonic') {
-      const { mnemonicToSeedSync, validateMnemonic } = await import('@scure/bip39');
+      const { mnemonicToEntropy, validateMnemonic } = await import('@scure/bip39');
       const { wordlist } = await import('@scure/bip39/wordlists/english.js');
       const trimmed = seedInput.trim().toLowerCase();
       if (!validateMnemonic(trimmed, wordlist)) {
         throw new Error('Invalid mnemonic phrase');
       }
-      return new Uint8Array(mnemonicToSeedSync(trimmed).slice(0, 32));
+      const entropy = mnemonicToEntropy(trimmed, wordlist);
+      return new Uint8Array(entropy.slice(0, 32));
     }
     const hex = seedInput.trim().replace(/^0x/, '');
     if (!/^[0-9a-f]+$/i.test(hex) || (hex.length !== 64 && hex.length !== 128)) {
@@ -70,8 +71,10 @@ export function Onboarding() {
       if (seedOverride) {
         seed = seedOverride;
       } else if (seedWords.length > 0 && step !== 'seed-input') {
-        const { mnemonicToSeedSync } = await import('@scure/bip39');
-        seed = new Uint8Array(mnemonicToSeedSync(seedWords.join(' ')).slice(0, 32));
+        const { mnemonicToEntropy } = await import('@scure/bip39');
+        const { wordlist: wl } = await import('@scure/bip39/wordlists/english.js');
+        const ent = mnemonicToEntropy(seedWords.join(' '), wl);
+        seed = new Uint8Array(ent.slice(0, 32));
       } else {
         seed = await parseSeedInput();
       }
@@ -101,6 +104,8 @@ export function Onboarding() {
       port.onMessage.addListener((msg) => {
         setCreating(false);
         if (msg.type === 'WALLET_ADDED' && msg.success) {
+          setSeedWords([]);
+          setSeedInput('');
           usePopupStore.getState().setHasVault(true);
           setStatus('initializing');
           showStatusMessage('Wallet syncing...', 'info');
@@ -146,6 +151,9 @@ export function Onboarding() {
             value={environment}
             onChange={(e) => setEnvironment(e.target.value as Environment)}
           >
+            <option value="" disabled>
+              Select a network…
+            </option>
             {ENVIRONMENT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
@@ -177,7 +185,11 @@ export function Onboarding() {
             <div className="text-status-red text-sm text-center">{error}</div>
           )}
 
-          <button className="btn-primary mt-4" onClick={() => setStep('method')}>
+          <button
+            className="btn-primary mt-4"
+            disabled={!environment}
+            onClick={() => setStep('method')}
+          >
             Import or Generate
           </button>
         </div>
@@ -238,14 +250,7 @@ export function Onboarding() {
             ))}
           </div>
 
-          <button
-            className="btn-secondary text-sm"
-            onClick={async () => {
-              await navigator.clipboard.writeText(seedWords.join(' '));
-            }}
-          >
-            Copy Seed Phrase
-          </button>
+          <SeedCopyButton seedWords={seedWords} />
 
           <button
             className="btn-primary"
@@ -369,5 +374,21 @@ export function Onboarding() {
         </div>
       )}
     </div>
+  );
+}
+
+function SeedCopyButton({ seedWords }: { seedWords: string[] }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="btn-secondary text-sm"
+      onClick={async () => {
+        await navigator.clipboard.writeText(seedWords.join(' '));
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+    >
+      {copied ? 'Copied!' : 'Copy Seed Phrase'}
+    </button>
   );
 }

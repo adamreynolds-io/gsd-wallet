@@ -150,33 +150,17 @@ export function Dashboard() {
           </div>
 
           <div className="grid grid-cols-2 gap-1.5">
-            <div className="bg-midnight-600 rounded px-2.5 py-2">
-              <div className="text-xs uppercase tracking-wider text-gray-500">NIGHT</div>
-              <div className="text-lg font-mono text-white truncate" title={formatBigInt(nightBal, NIGHT_DENOMINATION)}>
+            <div className="bg-midnight-600 rounded px-2 py-1">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">NIGHT</div>
+              <div className="text-sm font-mono text-white truncate" title={formatBigInt(nightBal, NIGHT_DENOMINATION)}>
                 {formatBigInt(nightBal, NIGHT_DENOMINATION)}
               </div>
             </div>
-            <div className="bg-midnight-600 rounded px-2.5 py-2">
-              <div className="text-xs uppercase tracking-wider text-gray-500">DUST</div>
-              <div className="text-lg font-mono text-white truncate" title={formatBigInt(dustBal, DUST_DENOMINATION)}>
+            <div className="bg-midnight-600 rounded px-2 py-1">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">DUST</div>
+              <div className="text-sm font-mono text-white truncate" title={formatBigInt(dustBal, DUST_DENOMINATION)}>
                 {formatLargeNumber(BigInt(dustBal), DUST_DENOMINATION)}
               </div>
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            {!state.isSynced && (
-              <div className="w-full h-1.5 bg-midnight-900 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-accent-purple to-accent-magenta rounded-full transition-[width] duration-300"
-                  style={{ width: `${state.overallSyncPercent}%` }}
-                />
-              </div>
-            )}
-            <div className="space-y-0.5">
-              <SyncDetailRow label="Shielded" color="text-fuchsia-400" progress={state.shielded.progress} percent={state.shielded.syncPercent} />
-              <SyncDetailRow label="Unshielded" color="text-blue-400" progress={state.unshielded.progress} percent={state.unshielded.syncPercent} />
-              <SyncDetailRow label="Dust" color="text-amber-400" progress={state.dust.progress} percent={state.dust.syncPercent} />
             </div>
           </div>
 
@@ -189,12 +173,12 @@ export function Dashboard() {
           <div className="flex-1" />
 
           <div className="flex gap-1.5 shrink-0">
-            <button className="btn-primary flex-1 text-xs !py-1.5" onClick={() => setTransferOpen(true)} title="Send transfer">Transfer</button>
-            <button className="btn-secondary flex-1 text-xs !py-1.5" onClick={() => setDustMode('register')} title="Register for dust">+Reg</button>
-            <button className="btn-secondary flex-1 text-xs !py-1.5" onClick={() => setDustMode('deregister')} title="Deregister">-Dereg</button>
+            <button className="btn-primary flex-1 text-xs !py-1" onClick={() => setTransferOpen(true)} title="Send transfer">Transfer</button>
+            <button className="btn-secondary flex-1 text-xs !py-1" onClick={() => setDustMode('register')} title="Register for dust">+Reg</button>
+            <button className="btn-secondary flex-1 text-xs !py-1" onClick={() => setDustMode('deregister')} title="Deregister">-Dereg</button>
           </div>
 
-          <div className="flex items-center justify-between shrink-0 text-xs pt-1 border-t border-midnight-500">
+          <div className="flex items-center justify-between shrink-0 text-xs">
             <div className="flex items-center gap-2">
               <StatusDot label="Node" ok={state.connections.node} />
               <StatusDot label="Idx" ok={state.connections.indexer} />
@@ -240,7 +224,7 @@ export function Dashboard() {
       {/* ── Bottom: Explorer + Diagnostics ── */}
       <div className={`border-t border-midnight-500 flex ${isFullTab ? 'flex-1 min-h-[150px]' : 'h-[280px] shrink-0'}`}>
         {/* Explorer panel */}
-        <div className={`bg-midnight-900 flex flex-col ${isFullTab ? 'flex-1 min-w-0' : 'flex-1'}`}>
+        <div className={`bg-midnight-900 flex flex-col ${isFullTab ? 'w-[40%] min-w-0' : 'w-[40%]'}`}>
           <div className="px-3 pt-1.5 shrink-0 space-y-1">
             <div className="flex items-center gap-1">
               <span className="text-xs uppercase tracking-wider text-gray-500">Explorer</span>
@@ -304,13 +288,13 @@ export function Dashboard() {
         </div>
 
         {/* Diagnostics panel */}
-        <div className="flex-1 min-w-0 border-l border-midnight-500">
+        <div className="w-[60%] min-w-0 border-l border-midnight-500">
           <DiagnosticsPanel />
         </div>
       </div>
 
       {/* Status bar */}
-      <StatusBar />
+      <SyncStatusBar state={state} />
 
       {/* Modals */}
       <TransferModal open={transferOpen} onClose={() => setTransferOpen(false)} />
@@ -380,23 +364,23 @@ function TokenRows({ label, balances }: { label: string; balances: Record<string
 
 /* ── Debug tabs ── */
 
-function SyncRow({ state }: { state: SerializedWalletState }) {
+function SyncStatusBar({ state }: { state: SerializedWalletState }) {
   const totalApplied = state.shielded.progress.applied + state.unshielded.progress.applied + state.dust.progress.applied;
   const totalHighest = state.shielded.progress.highest + state.unshielded.progress.highest + state.dust.progress.highest;
   const allConnected = state.shielded.progress.connected && state.unshielded.progress.connected && state.dust.progress.connected;
   const percent = totalHighest > 0 ? Math.floor((totalApplied / totalHighest) * 100) : 0;
   return (
-    <div className="mb-1.5">
-      <div className="flex justify-between text-xs text-gray-500 mb-0.5">
-        <span>{allConnected ? 'Connected' : 'Disconnected'}</span>
-        <span>{totalApplied.toLocaleString()} / {totalHighest.toLocaleString()} ({percent}%)</span>
-      </div>
-      <div className="w-full h-1 bg-midnight-900 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-[width] duration-300 ${allConnected ? 'bg-gradient-to-r from-accent-purple to-accent-magenta' : 'bg-gray-600'}`}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
+    <div className="shrink-0 flex items-center gap-3 px-3 py-0.5 bg-midnight-900 border-t border-midnight-600 text-xs">
+      <span className={`shrink-0 ${allConnected ? 'text-green-400' : 'text-red-400'}`}>
+        {allConnected ? 'Connected' : 'Disconnected'}
+      </span>
+      <span className="text-gray-500 font-mono shrink-0">
+        {totalApplied.toLocaleString()} / {totalHighest.toLocaleString()} ({percent}%)
+      </span>
+      <span className="text-midnight-600">|</span>
+      <SyncDetailRow label="Shielded" color="text-fuchsia-400" progress={state.shielded.progress} percent={state.shielded.syncPercent} />
+      <SyncDetailRow label="Unshielded" color="text-blue-400" progress={state.unshielded.progress} percent={state.unshielded.syncPercent} />
+      <SyncDetailRow label="Dust" color="text-amber-400" progress={state.dust.progress} percent={state.dust.syncPercent} />
     </div>
   );
 }
@@ -419,7 +403,6 @@ function DustDebug({ state }: {
 }) {
   return (
     <div className="space-y-1">
-      <SyncRow state={state} />
       <KV k="Balance" v={formatLargeNumber(BigInt(state.dust.balance), DUST_DENOMINATION)} />
       <KV k="Address" v={trunc(state.dust.address)} />
       <Divider label={`UTXOs (${state.unshielded.utxos.length})`} />
@@ -432,7 +415,6 @@ function ShieldedDebug({ state }: { state: SerializedWalletState }) {
   const entries = Object.entries(state.shielded.balances);
   return (
     <div className="space-y-1">
-      <SyncRow state={state} />
       <KV k="Coins" v={String(state.shielded.coinCount)} />
       <Divider label="Balances" />
       {entries.length === 0 ? (
@@ -455,7 +437,6 @@ function UnshieldedDebug({ state }: {
   const unreg = state.unshielded.utxos.filter((u) => !u.registered);
   return (
     <div className="space-y-1">
-      <SyncRow state={state} />
       <KV k="UTXOs" v={String(state.unshielded.utxos.length)} />
       <KV k="Registered" v={`${reg.length} / ${state.unshielded.utxos.length}`} />
       <KV k="Unregistered" v={String(unreg.length)} />
@@ -663,10 +644,10 @@ function SyncDetailRow({ label, color, progress, percent }: {
   const done = percent === 100 && progress.highest > 0 && progress.applied >= progress.highest;
   return (
     <div
-      className="flex items-center justify-between text-xs"
+      className="flex-1 flex items-center justify-between text-xs"
       title={`${label}: ${progress.applied.toLocaleString()} / ${progress.highest.toLocaleString()}`}
     >
-      <span className={`w-[72px] shrink-0 ${color}`}>{label}</span>
+      <span className={`shrink-0 ${color}`}>{label}</span>
       <span className="text-gray-500 font-mono">
         {done
           ? `${abbreviateCount(progress.applied)} synced`
@@ -676,33 +657,7 @@ function SyncDetailRow({ label, color, progress, percent }: {
   );
 }
 
-const STATUS_BAR_LEVEL_COLORS: Record<string, string> = {
-  debug: 'text-gray-500',
-  info: 'text-gray-400',
-  warn: 'text-amber-400',
-  error: 'text-red-400',
-};
 
-function StatusBar() {
-  const events = usePopupStore((s) => s.diagnosticEvents);
-  const last = events[events.length - 1];
-  if (!last) return null;
-
-  const ts = new Date(last.timestamp);
-  const timeStr = `${String(ts.getHours()).padStart(2, '0')}:${String(ts.getMinutes()).padStart(2, '0')}:${String(ts.getSeconds()).padStart(2, '0')}`;
-  const color = STATUS_BAR_LEVEL_COLORS[last.level] ?? 'text-gray-500';
-
-  return (
-    <div className="shrink-0 flex items-center gap-1.5 px-3 py-0.5 bg-midnight-900 border-t border-midnight-600 text-xs overflow-hidden">
-      <span className="text-gray-600 font-mono shrink-0">{timeStr}</span>
-      <span className={`shrink-0 ${color}`}>{last.category}</span>
-      <span className="text-gray-500 truncate">{last.message}</span>
-      {last.elapsed !== undefined && (
-        <span className="text-gray-600 shrink-0">{last.elapsed < 1000 ? `${last.elapsed}ms` : `${(last.elapsed / 1000).toFixed(1)}s`}</span>
-      )}
-    </div>
-  );
-}
 
 function Spinner() {
   return (

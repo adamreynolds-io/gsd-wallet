@@ -81,29 +81,55 @@ if (!(globalThis as Record<string, unknown>)['assert']) {
 
 This is the exact sequence. Each step has a tagged return type that **fails silently if not checked**.
 
+### Step 0: Mnemonic to seed
+
+If you generate or import a BIP-39 mnemonic, convert it to a seed using `mnemonicToEntropy` — **not** `mnemonicToSeedSync`. The SDK uses raw entropy (32 bytes for a 256-bit mnemonic), not the PBKDF2-derived 64-byte BIP-39 seed.
+
+```typescript
+import { mnemonicToEntropy, generateMnemonic } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
+
+const mnemonic = generateMnemonic(wordlist, 256); // 24 words
+const entropy = mnemonicToEntropy(mnemonic, wordlist);
+const seed = new Uint8Array(entropy.slice(0, 32));
+```
+
+**Trap:** Using `mnemonicToSeedSync` produces a different 64-byte seed via PBKDF2. Truncating it to 32 bytes gives you a seed that derives completely different keys from the same mnemonic. The official SDK tests confirm `mnemonicToEntropy` is the correct conversion.
+
 ### Step 1: Derive keys from seed
 
 ```typescript
-import { HDWallet, Roles } from '@midnight-ntwrk/wallet-sdk-hd';
+import { HDWallet, Roles, type Role } from '@midnight-ntwrk/wallet-sdk-hd';
 
 const hdWallet = HDWallet.fromSeed(seed);
+seed.fill(0); // Wipe seed from memory immediately after use
+
 if (hdWallet.type !== 'seedOk') {
   throw new Error('Invalid seed');  // No error message in the type — just a tag
 }
 
-const derivation = hdWallet.hdWallet
-  .selectAccount(0)
-  .selectRoles([Roles.Zswap, Roles.NightExternal, Roles.Dust])
-  .deriveKeysAt(0);
-
-if (derivation.type !== 'keysDerived') {
-  throw new Error('Key derivation failed');  // Again, just a tag
+// Derive per-role with retry — there is a small probability of
+// derivation failure at any given index, so retry with the next index.
+const account = hdWallet.hdWallet.selectAccount(0);
+function deriveRoleKey(role: Role, index = 0): Uint8Array {
+  const result = account.selectRole(role).deriveKeyAt(index);
+  if (result.type === 'keyDerived') return result.key;
+  if (index >= 5) throw new Error(`Key derivation failed for role ${role}`);
+  return deriveRoleKey(role, index + 1);
 }
+
+const derivedKeys = {
+  [Roles.Zswap]: deriveRoleKey(Roles.Zswap),
+  [Roles.NightExternal]: deriveRoleKey(Roles.NightExternal),
+  [Roles.Dust]: deriveRoleKey(Roles.Dust),
+};
 
 hdWallet.hdWallet.clear();  // Free memory — don't skip this
 ```
 
 **Trap:** If you don't check `.type`, the code continues with undefined keys and fails deep inside the facade with cryptic errors.
+
+**Seed wiping:** Call `seed.fill(0)` after `HDWallet.fromSeed()` and `hdWallet.clear()` after derivation. The SDK's own examples demonstrate this pattern.
 
 **Roles:**
 - `Roles.Zswap` (3) → shielded wallet seed
@@ -116,9 +142,9 @@ hdWallet.hdWallet.clear();  // Free memory — don't skip this
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { createKeystore, PublicKey } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
 
-const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(derivation.keys[Roles.Zswap]);
-const dustSecretKey = ledger.DustSecretKey.fromSeed(derivation.keys[Roles.Dust]);
-const unshieldedKeystore = createKeystore(derivation.keys[Roles.NightExternal], networkId);
+const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(derivedKeys[Roles.Zswap]);
+const dustSecretKey = ledger.DustSecretKey.fromSeed(derivedKeys[Roles.Dust]);
+const unshieldedKeystore = createKeystore(derivedKeys[Roles.NightExternal], networkId);
 ```
 
 ### Step 3: Initialize the facade
@@ -139,10 +165,10 @@ const facade = await WalletFacade.init({
     costParameters: { feeBlocksMargin: 5 },
     txHistoryStorage: new InMemoryTransactionHistoryStorage(),
   },
-  shielded: (cfg) => ShieldedWallet(cfg).startWithSeed(derivation.keys[Roles.Zswap]),
+  shielded: (cfg) => ShieldedWallet(cfg).startWithSeed(derivedKeys[Roles.Zswap]),
   unshielded: (cfg) => UnshieldedWallet(cfg).startWithPublicKey(PublicKey.fromKeyStore(unshieldedKeystore)),
   dust: (cfg) => DustWallet(cfg).startWithSeed(
-    derivation.keys[Roles.Dust],
+    derivedKeys[Roles.Dust],
     ledger.LedgerParameters.initialParameters().dust,
   ),
   provingService: () => makeServerProvingService({ provingServerUrl: new URL(provingServerUrl) }),

@@ -21,7 +21,7 @@ export async function walletStoreExists(): Promise<boolean> {
 
 export async function getStore(): Promise<WalletStore> {
   const store = await getWalletStore();
-  return store ?? { wallets: [], activeEnvironment: 'dev', activeWalletIndex: 0 };
+  return store ?? { wallets: [], activeEnvironment: 'undeployed', activeWalletIndex: 0 };
 }
 
 export async function addWallet(
@@ -97,13 +97,14 @@ export async function autoUnlock(): Promise<boolean> {
 }
 
 export function lock(): void {
+  if (activeSeed) activeSeed.fill(0);
   activeSeed = null;
   chrome.storage.session.remove(['gsdSessionActive']);
 }
 
 export async function clearAll(): Promise<void> {
   lock();
-  await saveWalletStore({ wallets: [], activeEnvironment: 'dev', activeWalletIndex: 0 });
+  await saveWalletStore({ wallets: [], activeEnvironment: 'undeployed', activeWalletIndex: 0 });
 }
 
 export async function getActiveWalletInfo(): Promise<{ environment: Environment; walletIndex: number; name: string } | null> {
