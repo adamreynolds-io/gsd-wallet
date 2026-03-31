@@ -107,6 +107,40 @@ export async function clearAll(): Promise<void> {
   await saveWalletStore({ wallets: [], activeEnvironment: 'undeployed', activeWalletIndex: 0 });
 }
 
+export async function deleteWallet(index: number): Promise<void> {
+  const store = await getStore();
+  if (!store.wallets[index]) throw new Error(`Wallet ${index} not found`);
+  store.wallets.splice(index, 1);
+  if (store.wallets.length === 0) {
+    store.activeWalletIndex = 0;
+    store.activeEnvironment = 'undeployed';
+  } else if (index <= store.activeWalletIndex) {
+    store.activeWalletIndex = Math.max(0, store.activeWalletIndex - 1);
+    const w = store.wallets[store.activeWalletIndex];
+    if (w) store.activeEnvironment = w.environment;
+  }
+  await saveWalletStore(store);
+}
+
+export async function getAllWalletsGrouped(): Promise<{
+  wallets: Record<Environment, Array<{ index: number; name: string }>>;
+  activeWalletIndex: number;
+  activeEnvironment: Environment;
+}> {
+  const store = await getStore();
+  const grouped: Record<string, Array<{ index: number; name: string }>> = {
+    mainnet: [], preprod: [], preview: [], qanet: [], dev: [], undeployed: [],
+  };
+  store.wallets.forEach((w, i) => {
+    grouped[w.environment]?.push({ index: i, name: w.name });
+  });
+  return {
+    wallets: grouped as Record<Environment, Array<{ index: number; name: string }>>,
+    activeWalletIndex: store.activeWalletIndex,
+    activeEnvironment: store.activeEnvironment,
+  };
+}
+
 export async function getActiveWalletInfo(): Promise<{ environment: Environment; walletIndex: number; name: string } | null> {
   const store = await getStore();
   const wallet = store.wallets[store.activeWalletIndex];

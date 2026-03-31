@@ -795,7 +795,7 @@ On mainnet with ~87k shielded and ~87k dust events, first sync takes several min
 | Sync percentage inflated (61% shown, actual 43%) | Averaging per-wallet percentages equally | Use `totalApplied / totalHighest` across all wallets |
 | API call hangs after SW restart | `autoUnlock` reinitializes facade while API handler uses old ref | Gate API handlers with `waitForReady()` before using facade |
 | DApp connects before user accepts disclaimer | Popup gate doesn't block service worker DApp handler | Check disclaimer in both popup AND DApp request handler independently |
-| `balanceUnboundTransaction` hangs | Facade balance method blocks indefinitely for some contract txs | Under investigation — diagnostics panel helps trace the exact stall point |
+| `balanceUnboundTransaction` hangs for contract calls | Dust balancer deterministic `IntentSegmentIdCollision` + 38s synchronous event loop block kills SW | Upstream SDK bug — see section 13 for full diagnosis. No GSD wallet fix possible. |
 | `HDWallet.fromSeed` returns but wallet fails later | Didn't check `.type === 'seedOk'` | Always check tagged return types |
 | Facade created but never syncs | Forgot to call `facade.start()` after `init()` | `.init()` and `.start()` are separate steps |
 | DApps can't discover wallet | Missing `midnight#ready` event dispatch | Dispatch `CustomEvent('midnight#ready')` after injection |
@@ -825,10 +825,15 @@ What the existing Midnight documentation covers vs what you actually need:
 | **React Native limitations** | — | — | **Gap** — no explicit statement of non-support |
 | **Chrome popup constraints** | — | — | **Gap** — 600px limit not documented |
 | **SW lifecycle & persistent storage** | — | — | **Addressed here** — checkpoint pattern with `serializeState()`/`restore()` |
+| **Facade computation model vs Chrome SW** | — | — | **Gap** — SDK assumes unbounded event loop blocking is safe; Chrome kills unresponsive SWs at ~30s. See section 14 |
+| **Dust balancer segment ID collision** | — | — | **Gap** — deterministic `IntentSegmentIdCollision` for all contract call transactions via DApp connector. See section 14 |
+| **Offscreen document for facade** | WASM prover example uses `makeWasmProvingService()` | — | **Gap** — SDK docs show WASM prover factory but don't address that the entire facade must run outside the SW for Chrome extensions |
 
 ---
 
 ## 12. Reference Implementation
+
+> **Note:** The reference implementation currently runs the facade in the service worker. Section 13 describes the required migration to the offscreen document.
 
 The GSD Wallet provides working implementations of every pattern in this guide:
 
@@ -862,7 +867,138 @@ Repository: `https://github.com/adamreynolds-io/gsd-wallet`
 
 ---
 
-## 13. Audit Findings (GSD Wallet v0.1.0)
+## 13. Facade Must Run Outside the Service Worker
+
+> **Not covered in SDK reference.** The SDK design docs (`docs/sdk-reference/design.md`) describe the variant/capability/SubscriptionRef architecture but assume a Node.js or Electron runtime. The SDK examples (`docs/sdk-reference/examples/wasm-prover.ts`) show `makeWasmProvingService()` as the production prover factory but don't address where the facade should live in a Chrome extension. This section fills that gap.
+
+### The problem
+
+The wallet SDK's `WalletFacade` runs long computations synchronously on the Effect runtime without yielding to the event loop. This is safe in Node.js and Electron. In a Chrome extension service worker, it is fatal.
+
+Chrome terminates any service worker whose event loop is blocked for approximately 30 seconds. The SDK's dust balancer (`transactingCapability.balanceTransactions()`) runs ~38 seconds of synchronous computation for contract call transactions. Chrome kills the service worker before the operation completes or errors. The DApp receives no response — a silent hang.
+
+This was verified by instrumenting the SDK's three balancers (shielded, unshielded, dust) with trace events. The trace shows all three semaphores are acquired instantly, the `blockData()` indexer fetch returns immediately, and the stall is entirely inside the dust balancer's synchronous computation phase. See [gsd-wallet#10](https://github.com/adamreynolds-io/gsd-wallet/issues/10) for the full evidence chain.
+
+Additionally, the dust balancer has a deterministic `IntentSegmentIdCollision` bug: it creates a fee intent on the same segment ID as the contract call intent in the input transaction. This collision occurs for every contract call transaction (not deploys, which use the fixed guaranteed segment). The collision is only detected after ~38 seconds of proving work, making the failure both slow and guaranteed.
+
+### Why `setTimeout` and `Promise.race` don't help
+
+A natural mitigation is to wrap the facade call in `Promise.race` with a `setTimeout` timeout:
+
+```typescript
+// THIS DOES NOT WORK
+const recipe = await Promise.race([
+  facade.balanceUnboundTransaction(tx, keys, { ttl }),
+  new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 20_000)),
+]);
+```
+
+This fails because `setTimeout` callbacks are dispatched on the same event loop that the facade computation is blocking. While the dust balancer runs synchronously for 38 seconds, no `setTimeout` callback can fire. The timeout and the computation share a single thread — neither can interrupt the other.
+
+### Required architecture: service worker as supervisor
+
+The facade must run in a separate execution context with its own event loop. In Chrome MV3, the only available option is an **offscreen document**.
+
+```
+DApp <-> content script <-> service worker (supervisor) <-> offscreen document (facade)
+                                 |                               |
+                            message routing                 WalletFacade
+                            timeout enforcement             balancing, proving
+                            state cache for UI              sync, state subscriptions
+                            keepalive                       own event loop
+```
+
+The service worker never calls the facade directly. It sends a message to the offscreen document, starts a timeout, and waits for a response. Because the service worker's event loop is free, `setTimeout` works normally.
+
+```typescript
+// Service worker — timeout works because event loop is free
+async function balanceViaOffscreen(txHex: string): Promise<string> {
+  const id = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Balance timed out after 60s'));
+    }, 60_000);
+
+    const handler = (msg: OffscreenMessage) => {
+      if (msg.id !== id) return;
+      clearTimeout(timeout);
+      offscreenPort.onMessage.removeListener(handler);
+      if (msg.error) reject(new Error(msg.error));
+      else resolve(msg.result);
+    };
+
+    offscreenPort.onMessage.addListener(handler);
+    offscreenPort.postMessage({ id, type: 'balance', txHex });
+  });
+}
+```
+
+The offscreen document has no lifecycle limit from Chrome — it stays alive as long as the service worker keeps it open. If it crashes, Chrome notifies the service worker via the port disconnect event.
+
+### What moves to the offscreen document
+
+| Component | Currently | Should be |
+|-----------|-----------|-----------|
+| `WalletFacade.init()` + full facade instance | Service worker | Offscreen document |
+| Shielded/unshielded/dust wallets | Service worker | Offscreen document |
+| Proving service (`makeServerProvingService` or `makeWasmProvingService`) | Service worker | Offscreen document |
+| Sync service + state subscriptions | Service worker | Offscreen document |
+| `balanceUnboundTransaction`, `finalizeRecipe`, all transacting | Service worker | Offscreen document |
+| Message routing (DApp connector, popup) | Service worker | Service worker (stays) |
+| Timeout enforcement | Service worker | Service worker (stays) |
+| State cache for popup UI | Service worker | Service worker (receives snapshots from offscreen) |
+| Checkpoint triggers | Service worker | Service worker (sends save command to offscreen) |
+
+### Heartbeat protocol for proving
+
+When the SDK takes on WASM proving (via `makeWasmProvingService()`), operations can take minutes. The offscreen document should send periodic heartbeats so the service worker can distinguish "still working" from "stalled":
+
+```typescript
+// Offscreen document
+async function proveWithHeartbeat(id: string, recipe: BalancingRecipe) {
+  const heartbeat = setInterval(() => {
+    port.postMessage({ id, type: 'heartbeat', phase: 'proving' });
+  }, 5_000);
+  try {
+    const result = await facade.finalizeRecipe(recipe);
+    port.postMessage({ id, type: 'result', result: serialize(result) });
+  } finally {
+    clearInterval(heartbeat);
+  }
+}
+
+// Service worker
+const HEARTBEAT_TIMEOUT = 15_000;
+let lastHeartbeat = Date.now();
+const monitor = setInterval(() => {
+  if (Date.now() - lastHeartbeat > HEARTBEAT_TIMEOUT) {
+    clearInterval(monitor);
+    reject(new Error('Proving stalled — no heartbeat for 15s'));
+  }
+}, 5_000);
+```
+
+### The SDK's factory pattern supports this
+
+`WalletFacade.init()` accepts factory functions for each wallet and the proving service. The facade doesn't care which execution context instantiates it. The factories work identically in a service worker or an offscreen document — they only require `fetch`, `WebSocket`, and `IndexedDB`, all of which are available in offscreen documents.
+
+The state bridge is straightforward: the offscreen document subscribes to `facade.state()` and posts serialized snapshots to the service worker on each emission. This is the same serialization already implemented for `chrome.storage.session` writes in the current architecture — the serialization just crosses a `postMessage` boundary instead of happening in-process.
+
+### Upstream SDK issues (not addressable from wallet side)
+
+Two issues require upstream fixes in `@midnight-ntwrk/wallet-sdk-dust-wallet`:
+
+1. **Deterministic segment ID collision**: The dust balancer creates fee intents on the same segment ID as the input transaction's contract call intent. This causes `IntentSegmentIdCollision` for every contract call transaction via the DApp connector. Deploy transactions (segment ID 1) are not affected. The fix: the dust balancer must exclude input transaction segment IDs when creating its fee intent.
+
+2. **Synchronous event loop blocking**: The dust balancer's `transactingCapability.balanceTransactions()` runs ~38 seconds of computation (internal proving) without yielding to the event loop. Even after the collision is fixed, any operation that blocks for >30 seconds is incompatible with Chrome's service worker lifecycle. The fix: the Effect runtime should yield periodically (via `scheduler.yield()` or `setTimeout(0)` trampolining) during long computations.
+
+### Validation
+
+The diagnosis was verified with [adamreynolds-io/issue-734-validation](https://github.com/adamreynolds-io/issue-734-validation) (7 Node.js tests proving the bug is browser-specific) and SDK trace instrumentation in the Chrome extension (identifying the exact stall point inside `dust: balanceTransactions COMPUTING`). Full evidence at [gsd-wallet#10](https://github.com/adamreynolds-io/gsd-wallet/issues/10).
+
+---
+
+## 14. Audit Findings (GSD Wallet v0.1.0)
 
 Code audit performed 2026-03-28 against wallet-sdk v3.0.0 documentation.
 

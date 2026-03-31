@@ -53,6 +53,9 @@ export type PopupRequest =
       };
     }
   | { type: 'GET_WALLETS'; environment: Environment }
+  | { type: 'GET_ALL_WALLETS' }
+  | { type: 'DELETE_WALLET'; index: number }
+  | { type: 'GET_WALLET_SEED'; index: number }
   | { type: 'SEND_TRANSFER'; params: TransferRequest }
   | { type: 'DUST_REGISTER'; utxoIds: string[]; receiverAddress?: string }
   | { type: 'DUST_DEREGISTER'; utxoIds: string[] }
@@ -65,6 +68,14 @@ export type PopupResponse =
   | { type: 'STATE_UPDATE'; state: SerializedWalletState }
   | { type: 'WALLET_ADDED'; success: boolean; error?: string }
   | { type: 'WALLETS_LIST'; wallets: Array<{ index: number; name: string }> }
+  | {
+      type: 'ALL_WALLETS';
+      wallets: Record<Environment, Array<{ index: number; name: string }>>;
+      activeWalletIndex: number;
+      activeEnvironment: Environment;
+    }
+  | { type: 'WALLET_DELETED'; success: boolean; error?: string }
+  | { type: 'WALLET_SEED'; seedHex: string }
   | { type: 'TRANSFER_RESULT'; result: TransactionResult }
   | { type: 'DUST_REGISTER_RESULT'; result: TransactionResult }
   | { type: 'DUST_DEREGISTER_RESULT'; result: TransactionResult }

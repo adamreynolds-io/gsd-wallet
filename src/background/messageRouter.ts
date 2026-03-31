@@ -314,6 +314,51 @@ async function handlePopupMessage(
         break;
       }
 
+      case 'GET_ALL_WALLETS': {
+        const result = await stateManager.getAllWalletsGrouped();
+        send({ type: 'ALL_WALLETS', ...result });
+        break;
+      }
+
+      case 'DELETE_WALLET': {
+        try {
+          const info = await stateManager.getActiveWalletInfo();
+          const wasActive = info?.walletIndex === msg.index;
+          await stateManager.deleteWallet(msg.index);
+          if (wasActive) {
+            await walletManager.stopWallet();
+            const newInfo = await stateManager.getActiveWalletInfo();
+            if (newInfo) {
+              const store = await stateManager.getStore();
+              const entry = store.wallets[newInfo.walletIndex];
+              const seed = stateManager.getSeed() ?? (entry ? new Uint8Array(entry.seed) : null);
+              if (!seed) break;
+              await walletManager.initializeWallet(
+                seed, newInfo.environment, 0, newInfo.name,
+              );
+            }
+          }
+          send({ type: 'WALLET_DELETED', success: true });
+        } catch (err) {
+          send({
+            type: 'WALLET_DELETED',
+            success: false,
+            error: err instanceof Error ? err.message : 'Failed to delete',
+          });
+        }
+        break;
+      }
+
+      case 'GET_WALLET_SEED': {
+        const store = await stateManager.getStore();
+        const entry = store.wallets[msg.index];
+        if (entry) {
+          const hex = Array.from(entry.seed, (b) => b.toString(16).padStart(2, '0')).join('');
+          send({ type: 'WALLET_SEED', seedHex: hex });
+        }
+        break;
+      }
+
       case 'LOCK': {
         await walletManager.stopWallet();
         stateManager.lock();
