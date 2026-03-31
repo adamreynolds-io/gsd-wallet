@@ -1,86 +1,25 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePopupStore } from '@popup/store/popupStore';
-import { ENVIRONMENT_OPTIONS, getEnvironmentLabel } from '@shared/environments';
-import type { Environment, SerializedWalletState } from '@shared/types';
-
-const LOCALNET_WALLETS = [0, 1, 2, 3];
+import { getEnvironmentLabel } from '@shared/environments';
+import type { SerializedWalletState } from '@shared/types';
+import { WalletMenu } from './WalletMenu';
 
 export function Header() {
   const navigate = useNavigate();
   const status = usePopupStore((s) => s.status);
   const walletState = usePopupStore((s) => s.walletState);
   const environment = usePopupStore((s) => s.environment);
-  const [wallets, setWallets] = useState<Array<{ index: number; name: string }>>([]);
-  const activeWalletName = walletState?.activeWalletName ?? '';
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuContainerRef = useRef<HTMLDivElement>(null);
 
   const currentEnv = walletState?.environment ?? environment;
   const isActive = status !== 'uninitialized';
-  const isLocalnet = currentEnv === 'undeployed';
 
-  const refreshWallets = useCallback(() => {
-    if (!isActive) return;
-    const port = chrome.runtime.connect({ name: 'gsd-popup' });
-    port.postMessage({ type: 'GET_WALLETS', environment: currentEnv });
-    port.onMessage.addListener((msg) => {
-      if (msg.type === 'WALLETS_LIST') {
-        setWallets(msg.wallets);
-      }
-      port.disconnect();
-    });
-  }, [currentEnv, isActive]);
-
-  useEffect(() => {
-    refreshWallets();
-  }, [refreshWallets]);
-
-  function handleNetworkSwitch(env: Environment) {
-    if (env === currentEnv) return;
-    const port = chrome.runtime.connect({ name: 'gsd-env-switch' });
-    port.postMessage({ type: 'SWITCH_ENVIRONMENT', environment: env });
-    port.onMessage.addListener((msg) => {
-      if (msg.type === 'ERROR') {
-        port.disconnect();
-        navigate('/onboarding');
-      }
-    });
-  }
-
-  function handleLocalnetWallet(walletIndex: number) {
-    const existing = wallets.find((w) => w.name === `Wallet ${walletIndex}`);
-    if (existing && activeWalletName !== `Wallet ${walletIndex}`) {
-      // Already imported with correct seed, just switch
-      const port = chrome.runtime.connect({ name: 'gsd-popup' });
-      port.postMessage({ type: 'SWITCH_WALLET', index: existing.index });
-      port.disconnect();
-    } else if (!existing) {
-      // Genesis wallets use seeds 1-4 (seed 1 = master wallet with all minted NIGHT)
-      const hex = (walletIndex + 1).toString(16).padStart(64, '0');
-      const bytes: number[] = [];
-      for (let i = 0; i < 32; i++) {
-        bytes.push(parseInt(hex.slice(i * 2, i * 2 + 2), 16));
-      }
-      const port = chrome.runtime.connect({ name: 'gsd-popup' });
-      port.postMessage({
-        type: 'ADD_WALLET',
-        name: `Wallet ${walletIndex}`,
-        seed: bytes,
-        environment: 'undeployed' as Environment,
-      });
-      port.onMessage.addListener((msg) => {
-        if (msg.type === 'WALLET_ADDED') {
-          refreshWallets();
-        }
-        port.disconnect();
-      });
-    }
-  }
-
-  function handleWalletSwitch(index: number) {
-    const port = chrome.runtime.connect({ name: 'gsd-popup' });
-    port.postMessage({ type: 'SWITCH_WALLET', index });
-    port.disconnect();
-  }
+  const rawName = walletState?.activeWalletName ?? '';
+  const headerLabel = /^Wallet [0-3]$/.test(rawName) && currentEnv === 'undeployed'
+    ? `Genesis W${rawName.slice(-1)}`
+    : currentEnv ? getEnvironmentLabel(currentEnv) : 'No Wallet';
 
   return (
     <>
@@ -97,77 +36,31 @@ export function Header() {
         </div>
         {isActive && (
           <>
-            <select
-              className="text-xs bg-midnight-600 text-gray-300 border border-midnight-400 rounded px-1.5 py-0.5 cursor-pointer focus:outline-none focus:border-accent-purple"
-              value={currentEnv}
-              onChange={(e) => handleNetworkSwitch(e.target.value as Environment)}
-            >
-              {ENVIRONMENT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+            <div className="relative" ref={menuContainerRef}>
+              <button
+                onClick={() => setMenuOpen((prev) => !prev)}
+                aria-expanded={menuOpen}
+                aria-haspopup="true"
+                className="flex items-center gap-1.5 text-xs bg-midnight-600 text-gray-300 border border-midnight-400 rounded px-2 py-1 hover:bg-midnight-500 hover:border-midnight-300 transition-colors cursor-pointer"
+              >
+                <span className="font-medium text-white truncate max-w-[140px]">
+                  {headerLabel}
+                </span>
+                <ChevronDownIcon />
+              </button>
+              <WalletMenu
+                isOpen={menuOpen}
+                onClose={() => setMenuOpen(false)}
+                currentEnv={currentEnv}
+                containerRef={menuContainerRef}
+              />
+            </div>
             <SyncStatusBadge walletState={walletState} />
           </>
         )}
       </div>
 
       <div className="flex items-center gap-1.5">
-        {/* Localnet wallet picker */}
-        {isActive && isLocalnet && (
-          <div className="flex items-center gap-0.5">
-            <button
-              onClick={() => {
-                if (confirm('Clear all wallets?')) {
-                  const port = chrome.runtime.connect({ name: 'gsd-popup' });
-                  port.postMessage({ type: 'CLEAR_ALL' });
-                  port.disconnect();
-                  usePopupStore.getState().setHasVault(false);
-                  usePopupStore.getState().setStatus('uninitialized');
-                  usePopupStore.getState().setWalletState(null as never);
-                  navigate('/onboarding');
-                }
-              }}
-              className="text-[10px] px-1 py-0.5 rounded text-gray-500 hover:text-status-red hover:bg-midnight-600 transition-colors"
-              title="Clear all wallets"
-            >
-              &#x2715;
-            </button>
-            {LOCALNET_WALLETS.map((i) => {
-              const imported = wallets.some((w) => w.name === `Wallet ${i}`);
-              const isCurrentWallet = activeWalletName === `Wallet ${i}`;
-              return (
-                <button
-                  key={i}
-                  onClick={() => handleLocalnetWallet(i)}
-                  className={`text-[10px] px-1.5 py-0.5 rounded font-mono transition-colors ${
-                    isCurrentWallet
-                      ? 'bg-accent-purple text-white'
-                      : imported
-                        ? 'bg-midnight-600 text-gray-300 hover:bg-midnight-500'
-                        : 'bg-midnight-700 text-gray-500 hover:bg-midnight-600 hover:text-gray-300'
-                  }`}
-                  title={imported ? `Switch to Wallet ${i}` : `Import Wallet ${i}`}
-                >
-                  W{i}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Non-localnet wallet switcher */}
-        {isActive && !isLocalnet && wallets.length > 1 && (
-          <select
-            className="text-xs bg-midnight-600 text-gray-300 border border-midnight-400 rounded px-1.5 py-0.5 cursor-pointer focus:outline-none focus:border-accent-purple"
-            value={wallets.find((w) => w.name === activeWalletName)?.index ?? 0}
-            onChange={(e) => handleWalletSwitch(Number(e.target.value))}
-          >
-            {wallets.map((w) => (
-              <option key={w.index} value={w.index}>{w.name}</option>
-            ))}
-          </select>
-        )}
-
         <a
           href="https://github.com/adamreynolds-io/gsd-wallet"
           target="_blank"
@@ -279,6 +172,14 @@ function SyncStatusBadge({ walletState }: { walletState: SerializedWalletState |
   }
 
   return <span className={`text-xs ${color}`}>{text}</span>;
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
 }
 
 function SettingsIcon() {

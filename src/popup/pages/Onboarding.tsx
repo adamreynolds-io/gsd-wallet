@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePopupStore } from '@popup/store/popupStore';
-import { ENVIRONMENT_OPTIONS } from '@shared/environments';
+import { ENVIRONMENT_OPTIONS, getEnvironmentLabel } from '@shared/environments';
 import type { Environment, SeedType } from '@shared/types';
 
 type Step =
@@ -92,7 +92,8 @@ export function Onboarding() {
         }
       }
 
-      const walletName = nameOverride ?? (seedWords.length > 0 ? 'Generated' : 'Imported');
+      const envLabel = environment ? getEnvironmentLabel(environment) : 'Wallet';
+      const walletName = nameOverride ?? envLabel;
       const port = chrome.runtime.connect({ name: 'gsd-popup' });
       port.postMessage({
         type: 'ADD_WALLET',
@@ -102,18 +103,21 @@ export function Onboarding() {
       });
 
       port.onMessage.addListener((msg) => {
-        setCreating(false);
-        if (msg.type === 'WALLET_ADDED' && msg.success) {
-          setSeedWords([]);
-          setSeedInput('');
-          usePopupStore.getState().setHasVault(true);
-          setStatus('initializing');
-          showStatusMessage('Wallet syncing...', 'info');
-          navigate('/dashboard');
-        } else {
-          setError(msg.error ?? 'Failed to create wallet');
+        if (msg.type === 'WALLET_ADDED') {
+          setCreating(false);
+          if (msg.success) {
+            setSeedWords([]);
+            setSeedInput('');
+            usePopupStore.getState().setHasVault(true);
+            setStatus('initializing');
+            showStatusMessage('Wallet syncing...', 'info');
+            navigate('/dashboard');
+          } else {
+            setError(msg.error ?? 'Failed to create wallet');
+          }
+          port.disconnect();
         }
-        port.disconnect();
+        // Ignore other messages (STATE_UPDATE, DIAGNOSTIC_EVENT, etc.)
       });
     } catch (err) {
       setCreating(false);

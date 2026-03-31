@@ -147,16 +147,18 @@ export async function saveSetting<T>(
 function sdkStateKey(
   environment: Environment,
   accountIndex: number,
+  walletId: string,
 ): string {
-  return `${environment}:${accountIndex}`;
+  return `${environment}:${accountIndex}:${walletId}`;
 }
 
 export async function getSdkState(
   environment: Environment,
   accountIndex: number,
+  walletId: string,
 ): Promise<PersistedSdkState | undefined> {
   const db = await getDb();
-  return db.get('sdkState', sdkStateKey(environment, accountIndex)) as
+  return db.get('sdkState', sdkStateKey(environment, accountIndex, walletId)) as
     Promise<PersistedSdkState | undefined>;
 }
 
@@ -170,9 +172,10 @@ export async function saveSdkState(
 export async function deleteSdkState(
   environment: Environment,
   accountIndex: number,
+  walletId: string,
 ): Promise<void> {
   const db = await getDb();
-  await db.delete('sdkState', sdkStateKey(environment, accountIndex));
+  await db.delete('sdkState', sdkStateKey(environment, accountIndex, walletId));
 }
 
 export async function deleteAllSdkState(): Promise<void> {

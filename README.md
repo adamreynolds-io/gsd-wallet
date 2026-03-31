@@ -13,9 +13,10 @@ Chrome extension wallet for dApp developers building on the [Midnight](https://m
 ## Features
 
 - **Multi-environment** — Undeployed (localhost), DevNet, QANet, Preview, PreProd, Mainnet
+- **Wallet manager menu** — unified dropdown showing all wallets grouped by network, with create/switch/delete/copy-seed actions
 - **Quick-start on localnet** — one-click import of 4 prefunded genesis wallets (W0-W3)
 - **Wallet management** — generate 24-word mnemonic or import seed phrase / hex seed
-- **Multi-wallet** — multiple wallets per environment with quick-switch
+- **Multi-wallet** — multiple wallets per environment, each with isolated sync state
 - **Shielded & unshielded transfers** — send tokens with ZK proving via server prover
 - **Dust operations** — register/deregister UTXOs for dust generation
 - **DApp connector** — `window.midnight` injection implementing the Midnight DApp connector API

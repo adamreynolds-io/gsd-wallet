@@ -16,6 +16,7 @@ export async function saveCheckpoint(
   txHistoryStorage: InMemoryTransactionHistoryStorage,
   environment: Environment,
   accountIndex: number,
+  walletId: string,
 ): Promise<void> {
   const [shieldedState, unshieldedState, dustState] =
     await Promise.all([
@@ -25,7 +26,7 @@ export async function saveCheckpoint(
     ]);
 
   const state: PersistedSdkState = {
-    key: `${environment}:${accountIndex}`,
+    key: `${environment}:${accountIndex}:${walletId}`,
     environment,
     accountIndex,
     shieldedState,
@@ -48,8 +49,9 @@ export async function saveCheckpoint(
 export async function loadCheckpoint(
   environment: Environment,
   accountIndex: number,
+  walletId: string,
 ): Promise<PersistedSdkState | null> {
-  const state = await getSdkState(environment, accountIndex);
+  const state = await getSdkState(environment, accountIndex, walletId);
   if (!state) {
     return null;
   }
@@ -64,7 +66,7 @@ export async function loadCheckpoint(
         current: __SDK_FACADE_VERSION__,
       },
     );
-    await deleteSdkState(environment, accountIndex);
+    await deleteSdkState(environment, accountIndex, walletId);
     return null;
   }
 
@@ -74,8 +76,9 @@ export async function loadCheckpoint(
 export async function clearCheckpoint(
   environment: Environment,
   accountIndex: number,
+  walletId: string,
 ): Promise<void> {
-  await deleteSdkState(environment, accountIndex);
+  await deleteSdkState(environment, accountIndex, walletId);
   emit(
     'debug',
     'storage',

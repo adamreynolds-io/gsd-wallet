@@ -61,6 +61,7 @@ interface ActiveWallet {
   environment: Environment;
   accountIndex: number;
   walletName: string;
+  walletId: string;
   subscription: { unsubscribe(): void };
   latestState: FacadeState | null;
   startPromise: Promise<void> | null;
@@ -295,9 +296,12 @@ async function initializeWalletCore(
     ? { ...envConfig, ...customUrls }
     : envConfig;
 
+  const walletId = Array.from(seed.slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('');
+
   emit('debug', 'wallet', 'Deriving HD keys');
-  const hdWallet = HDWallet.fromSeed(seed);
-  seed.fill(0);
+  const seedCopy = new Uint8Array(seed);
+  const hdWallet = HDWallet.fromSeed(seedCopy);
+  seedCopy.fill(0);
   if (hdWallet.type !== 'seedOk') {
     emit('error', 'wallet', 'HDWallet.fromSeed failed', { type: hdWallet.type });
     throw new Error('Failed to initialize HDWallet from seed');
@@ -330,7 +334,7 @@ async function initializeWalletCore(
     effectiveConfig.networkId,
   );
 
-  const checkpoint = await loadCheckpoint(environment, accountIndex);
+  const checkpoint = await loadCheckpoint(environment, accountIndex, walletId);
   const txHistoryStorage = checkpoint
     ? InMemoryTransactionHistoryStorage.fromSerialized(
         checkpoint.txHistoryState,
@@ -389,7 +393,7 @@ async function initializeWalletCore(
         'Checkpoint restore failed, falling back to fresh sync',
         { error: String(restoreErr) },
       );
-      await clearCheckpoint(environment, accountIndex);
+      await clearCheckpoint(environment, accountIndex, walletId);
       facade = await WalletFacade.init({
         configuration: config,
         shielded: (cfg) =>
@@ -553,6 +557,7 @@ async function initializeWalletCore(
         txHistoryStorage,
         environment,
         accountIndex,
+        walletId,
       ).catch((err) => {
         emit('warn', 'storage', 'Checkpoint failed', {
           error: String(err),
@@ -601,6 +606,7 @@ async function initializeWalletCore(
     environment,
     accountIndex,
     walletName,
+    walletId,
     subscription: sub,
     latestState: null,
     startPromise: null,
@@ -660,6 +666,7 @@ export async function stopWallet(): Promise<void> {
         activeWallet.txHistoryStorage,
         activeWallet.environment,
         activeWallet.accountIndex,
+        activeWallet.walletId,
       );
     } catch (e) {
       emit('warn', 'storage', 'Final checkpoint save failed', {
