@@ -26,13 +26,12 @@ export function Header() {
     <header className="flex items-center justify-between px-4 py-2 bg-midnight-800 border-b border-midnight-500 shrink-0">
       <div className="flex items-center gap-2">
         <div className="flex items-center gap-1.5">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 0C5.37275 0 0 5.37275 0 12C0 18.6273 5.37275 24 12 24C18.6273 24 24 18.6273 24 12C24 5.37275 18.6273 0 12 0ZM12 21.787C6.60346 21.787 2.21305 17.3965 2.21305 12C2.21305 6.60346 6.60276 2.21235 12 2.21235C17.3972 2.21235 21.787 6.60276 21.787 11.9993C21.787 17.3958 17.3965 21.7863 12 21.7863V21.787Z" fill="white"/>
-            <path d="M13.127 10.874H10.874V13.127H13.127V10.874Z" fill="white"/>
-            <path d="M13.127 7.31738H10.874V9.57031H13.127V7.31738Z" fill="white"/>
-            <path d="M13.127 3.76074H10.874V6.01367H13.127V3.76074Z" fill="white"/>
+          <svg width="12" height="20" viewBox="0 0 230 406" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Shielded Technologies">
+            <title>Personal project by Adam Reynolds, Engineering Manager, Platform &amp; Tooling @ Shielded Technologies</title>
+            <path d="M92.0992 119.478V262.61L0 214.288V71.1553L137.901 0L230 48.3223L92.0992 119.478Z" fill="#FF4933"/>
+            <path d="M230 191.45V334.647L92.0992 405.802L0 357.416L137.901 286.324V143.128L230 191.45Z" fill="#FF4933"/>
           </svg>
-          <h1 className="text-lg font-bold text-white tracking-wide">Midnight GSD</h1>
+          <h1 className="text-lg font-bold text-white tracking-wide">G.S.D. Wallet</h1>
         </div>
         {isActive && (
           <>
