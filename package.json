@@ -17,7 +17,7 @@
     "@scure/bip39": "2.0.1",
     "assert": "^2.1.0",
     "buffer": "^6.0.3",
-    "idb": "8.0.2",
+    "idb": "8.0.3",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-router-dom": "7.5.0",
