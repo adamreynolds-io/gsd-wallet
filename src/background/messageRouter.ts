@@ -1,18 +1,10 @@
 import type { PopupRequest, PopupResponse } from '@shared/messages';
-import type { SerializedWalletState } from '@shared/types';
-import { executeTransfer } from '@core/transfer';
-import { executeDustRegistration } from '@core/dustRegistration';
-import { executeDustDeregistration } from '@core/dustDeregistration';
+import type { DiagnosticEvent, SerializedWalletState, TransactionResult, TxHistoryEntry } from '@shared/types';
 import { getCachedUpdate } from './updateChecker';
-import {
-  addTxHistoryEntry,
-  getTxHistory,
-  deleteAllSdkState,
-} from '@shared/storage';
-import { handleApiCall } from './connectedApiHandler';
 import * as stateManager from './stateManager';
-import * as walletManager from './walletManager';
-import { emit, onEvent, getBacklog } from './diagnosticLogger';
+import * as offscreenClient from './offscreenClient';
+import { PORT_NAME as OFFSCREEN_PORT_NAME } from './offscreenClient';
+import { emit, onEvent } from './diagnosticLogger';
 
 type SendResponse = (response: PopupResponse) => void;
 
@@ -31,9 +23,26 @@ function broadcastState(state: SerializedWalletState): void {
 }
 
 export function setupMessageRouter(): void {
-  walletManager.onStateChange(broadcastState);
+  // Relay state updates and diagnostic events from offscreen to popup ports
+  offscreenClient.onBroadcast((broadcast) => {
+    if (broadcast.type === 'STATE_UPDATE') {
+      const state = broadcast.payload as SerializedWalletState;
+      // Cache in session storage for new popup connections
+      chrome.storage.session.set({ gsdLastState: state });
+      broadcastState(state);
+    }
+    if (broadcast.type === 'DIAGNOSTIC_EVENT') {
+      const msg: PopupResponse = {
+        type: 'DIAGNOSTIC_EVENT',
+        event: broadcast.payload as DiagnosticEvent,
+      };
+      for (const port of connectedPorts) {
+        try { port.postMessage(msg); } catch { /* */ }
+      }
+    }
+  });
 
-  // Broadcast diagnostic events to all connected popup ports
+  // Broadcast SW-side diagnostic events to popup ports
   onEvent((event) => {
     const msg: PopupResponse = { type: 'DIAGNOSTIC_EVENT', event };
     for (const port of connectedPorts) {
@@ -42,8 +51,9 @@ export function setupMessageRouter(): void {
   });
 
   chrome.runtime.onConnect.addListener((port) => {
-    // Keepalive port from offscreen document — just hold it open
-    if (port.name === 'gsd-keepalive') {
+    if (port.name === OFFSCREEN_PORT_NAME) {
+      // Offscreen document initiated connection — hand the port to offscreenClient
+      offscreenClient.acceptPort(port);
       return;
     }
 
@@ -75,13 +85,17 @@ export function setupMessageRouter(): void {
         });
       });
 
-      const currentState = walletManager.getLatestSerializedState();
-      if (currentState) {
-        port.postMessage({
-          type: 'STATE_UPDATE',
-          state: currentState,
-        } satisfies PopupResponse);
-      }
+      // Send last known state to newly connected popup
+      chrome.storage.session.get('gsdLastState').then((cached) => {
+        if (cached['gsdLastState']) {
+          try {
+            port.postMessage({
+              type: 'STATE_UPDATE',
+              state: cached['gsdLastState'] as SerializedWalletState,
+            } satisfies PopupResponse);
+          } catch { /* */ }
+        }
+      });
 
       // Notify popup if an update is available
       const update = getCachedUpdate();
@@ -98,10 +112,14 @@ export function setupMessageRouter(): void {
       port.onMessage.addListener((msg) => {
         if (msg.type !== 'DAPP_REQUEST') return;
         const { requestId, payload, origin } = msg;
-        emit('info', 'dapp', `dApp request: ${payload?.['type']} ${payload?.['method'] ?? ''}`, { requestId, type: payload?.['type'], method: payload?.['method'], origin });
+        emit('info', 'dapp', `dApp request: ${payload?.['type']} ${payload?.['method'] ?? ''}`, {
+          requestId, type: payload?.['type'], method: payload?.['method'], origin,
+        });
 
         handleDappRequest(payload, origin).then((response) => {
-          emit('debug', 'dapp', `dApp response: ${requestId}`, { requestId, responseType: (response as Record<string, unknown>)?.['type'] });
+          emit('debug', 'dapp', `dApp response: ${requestId}`, {
+            requestId, responseType: (response as Record<string, unknown>)?.['type'],
+          });
           try {
             port.postMessage({ requestId, payload: response });
           } catch (e) {
@@ -110,7 +128,10 @@ export function setupMessageRouter(): void {
         }).catch((e) => {
           emit('error', 'error', `dApp request handler error`, { requestId, error: String(e) });
           try {
-            port.postMessage({ requestId, payload: { type: 'GSD_ERROR', error: { code: 'InternalError', reason: String(e) } } });
+            port.postMessage({
+              requestId,
+              payload: { type: 'GSD_ERROR', error: { code: 'InternalError', reason: String(e) } },
+            });
           } catch { /* */ }
         });
       });
@@ -119,7 +140,6 @@ export function setupMessageRouter(): void {
 
   // Track connected dApp sessions with TTL
   const SESSION_TTL_MS = 30 * 60 * 1000;
-
   setInterval(() => {
     const now = Date.now();
     for (const [id, session] of sessions) {
@@ -127,61 +147,7 @@ export function setupMessageRouter(): void {
     }
   }, 60_000);
 
-  async function isDisclaimerAccepted(): Promise<boolean> {
-    const result = await chrome.storage.local.get('gsdDisclaimerAccepted');
-    return result['gsdDisclaimerAccepted'] === true;
-  }
-
-  // Shared dApp request handler (used by both port and one-shot messages)
-  async function handleDappRequest(
-    payload: Record<string, unknown>,
-    origin: string,
-  ): Promise<unknown> {
-    if (!(await isDisclaimerAccepted())) {
-      return {
-        type: 'GSD_ERROR',
-        error: { code: 'NotReady', reason: 'Wallet disclaimer has not been accepted. Open the wallet popup first.' },
-      };
-    }
-
-    if (payload['type'] === 'GSD_CONNECT') {
-      await walletManager.waitForReady();
-      const sessionId = crypto.randomUUID();
-      sessions.set(sessionId, {
-        origin: origin ?? (payload['origin'] as string),
-        networkId: payload['networkId'] as string,
-        createdAt: Date.now(),
-      });
-      emit('info', 'dapp', `dApp connected: ${origin}`, { sessionId, networkId: payload['networkId'], origin });
-      return { type: 'GSD_RESPONSE', result: sessionId };
-    }
-
-    if (payload['type'] === 'GSD_API_CALL') {
-      const method = payload['method'] as string;
-      const args = payload['args'] as unknown[];
-      const sessionId = payload['sessionId'] as string;
-      const session = sessions.get(sessionId);
-      if (!session) {
-        return {
-          type: 'GSD_ERROR',
-          error: { code: 'Disconnected', reason: 'Session not found — call connect() first' },
-        };
-      }
-
-      const apiResult = await handleApiCall(method, args);
-      if ('error' in apiResult) {
-        return { type: 'GSD_ERROR', error: apiResult.error };
-      }
-      return { type: 'GSD_RESPONSE', result: apiResult.result };
-    }
-
-    return {
-      type: 'GSD_ERROR',
-      error: { code: 'InvalidRequest', reason: `Unknown payload type: ${payload['type']}` },
-    };
-  }
-
-  // One-shot messages (popup checks)
+  // One-shot messages (popup checks before port is established)
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === 'CHECK_HAS_WALLETS') {
       stateManager
@@ -191,34 +157,67 @@ export function setupMessageRouter(): void {
     }
     return false;
   });
+}
 
-  // Keepalive alarm — must do async work to extend SW lifetime
-  chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === 'gsd-keepalive') {
-      // Touch session storage to prove the SW is alive and reset idle timer
-      chrome.storage.session.set({ gsdKeepalive: Date.now() });
-    }
-  });
+async function isDisclaimerAccepted(): Promise<boolean> {
+  const result = await chrome.storage.local.get('gsdDisclaimerAccepted');
+  return result['gsdDisclaimerAccepted'] === true;
+}
 
-  // Auto-unlock on SW start if wallets exist
-  emit('info', 'wallet', 'Auto-unlock: checking for existing wallets');
-  stateManager.autoUnlock().then(async (unlocked) => {
-    if (unlocked) {
-      const info = await stateManager.getActiveWalletInfo();
-      const seed = stateManager.getSeed();
-      if (info && seed) {
-        try {
-          emit('info', 'wallet', 'Auto-unlock: initializing wallet', { environment: info.environment, name: info.name });
-          await walletManager.initializeWallet(seed, info.environment, 0, info.name);
-          emit('info', 'wallet', 'Auto-unlock: wallet ready');
-        } catch (err) {
-          emit('error', 'wallet', 'Auto-unlock failed', { error: String(err) });
-        }
-      }
-    } else {
-      emit('debug', 'wallet', 'Auto-unlock: no wallets found');
+async function handleDappRequest(
+  payload: Record<string, unknown>,
+  origin: string,
+): Promise<unknown> {
+  if (!(await isDisclaimerAccepted())) {
+    return {
+      type: 'GSD_ERROR',
+      error: {
+        code: 'NotReady',
+        reason: 'Wallet disclaimer has not been accepted. Open the wallet popup first.',
+      },
+    };
+  }
+
+  if (payload['type'] === 'GSD_CONNECT') {
+    await offscreenClient.waitForReady();
+    const sessionId = crypto.randomUUID();
+    sessions.set(sessionId, {
+      origin: origin ?? (payload['origin'] as string),
+      networkId: payload['networkId'] as string,
+      createdAt: Date.now(),
+    });
+    emit('info', 'dapp', `dApp connected: ${origin}`, {
+      sessionId, networkId: payload['networkId'], origin,
+    });
+    return { type: 'GSD_RESPONSE', result: sessionId };
+  }
+
+  if (payload['type'] === 'GSD_API_CALL') {
+    const method = payload['method'] as string;
+    const args = payload['args'] as unknown[];
+    const sessionId = payload['sessionId'] as string;
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return {
+        type: 'GSD_ERROR',
+        error: { code: 'Disconnected', reason: 'Session not found — call connect() first' },
+      };
     }
-  });
+
+    const apiResult = await offscreenClient.request('DAPP_API_CALL', { method, args }) as
+      | { result: unknown }
+      | { error: { code: string; reason: string } };
+
+    if ('error' in apiResult) {
+      return { type: 'GSD_ERROR', error: apiResult.error };
+    }
+    return { type: 'GSD_RESPONSE', result: apiResult.result };
+  }
+
+  return {
+    type: 'GSD_ERROR',
+    error: { code: 'InvalidRequest', reason: `Unknown payload type: ${payload['type']}` },
+  };
 }
 
 async function handlePopupMessage(
@@ -234,18 +233,38 @@ async function handlePopupMessage(
       }
 
       case 'GET_STATE': {
-        const state = walletManager.getLatestSerializedState();
+        const state = await offscreenClient.request('GET_STATE', null)
+          .catch(() => null) as SerializedWalletState | null;
         if (state) {
           send({ type: 'STATE_UPDATE', state });
-        } else {
-          const cached = await chrome.storage.session.get('gsdLastState');
-          if (cached['gsdLastState']) {
-            send({
-              type: 'STATE_UPDATE',
-              state: cached['gsdLastState'] as SerializedWalletState,
-            });
-          }
+          break;
         }
+        // Offscreen not ready — try session storage cache
+        const cached = await chrome.storage.session.get('gsdLastState');
+        if (cached['gsdLastState']) {
+          send({
+            type: 'STATE_UPDATE',
+            state: cached['gsdLastState'] as SerializedWalletState,
+          });
+          break;
+        }
+        // Nothing available — send an empty initializing state so popup doesn't hang
+        send({
+          type: 'STATE_UPDATE',
+          state: {
+            status: 'initializing',
+            environment: (await stateManager.getActiveWalletInfo())?.environment ?? 'undeployed',
+            activeAccountIndex: 0,
+            shielded: { address: '', balances: {}, coinCount: 0, syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+            unshielded: { address: '', balances: {}, utxos: [], syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+            dust: { address: '', balance: '0', syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+            overallSyncPercent: 0,
+            isSynced: false,
+            syncPhase: 'connecting',
+            connections: { node: false, indexer: false, prover: false },
+            activeWalletName: (await stateManager.getActiveWalletInfo())?.name ?? '',
+          } as SerializedWalletState,
+        });
         break;
       }
 
@@ -254,8 +273,14 @@ async function handlePopupMessage(
           const seed = new Uint8Array(msg.seed);
           await stateManager.addWallet(msg.name, seed, msg.environment);
           send({ type: 'WALLET_ADDED', success: true });
-          walletManager.initializeWallet(seed, msg.environment, 0, msg.name)
-            .catch((err) => console.error('[GSD] Wallet init failed:', err));
+          offscreenClient.request('INIT_WALLET', {
+            seed: Array.from(seed),
+            environment: msg.environment,
+            accountIndex: 0,
+            walletName: msg.name,
+          }).catch((err) => {
+            emit('error', 'wallet', 'Wallet init failed after ADD_WALLET', { error: String(err) });
+          });
         } catch (err) {
           send({
             type: 'WALLET_ADDED',
@@ -271,7 +296,13 @@ async function handlePopupMessage(
           const seed = await stateManager.switchWallet(msg.index);
           const info = await stateManager.getActiveWalletInfo();
           if (info) {
-            await walletManager.initializeWallet(seed, info.environment, 0, info.name);
+            await offscreenClient.request('STOP_WALLET', null);
+            await offscreenClient.request('INIT_WALLET', {
+              seed: Array.from(seed),
+              environment: info.environment,
+              accountIndex: 0,
+              walletName: info.name,
+            });
           }
         } catch (err) {
           send({
@@ -294,15 +325,23 @@ async function handlePopupMessage(
         if (seed) {
           const swInfo = await stateManager.getActiveWalletInfo();
           try {
-            await walletManager.initializeWallet(
-              seed, msg.environment, 0, swInfo?.name ?? '', msg.customUrls,
-            );
+            await offscreenClient.request('STOP_WALLET', null);
+            await offscreenClient.request('INIT_WALLET', {
+              seed: Array.from(seed),
+              environment: msg.environment,
+              accountIndex: 0,
+              walletName: swInfo?.name ?? '',
+              customUrls: msg.customUrls,
+            });
           } catch (err) {
-            send({ type: 'ERROR', error: err instanceof Error ? err.message : 'Failed to initialize wallet' });
+            send({
+              type: 'ERROR',
+              error: err instanceof Error ? err.message : 'Failed to initialize wallet',
+            });
           }
         } else {
-          // No wallet for this environment — tell popup to show import
-          await walletManager.stopWallet();
+          // No wallet for this environment — stop and tell popup to show import
+          await offscreenClient.request('STOP_WALLET', null).catch(() => { /* best effort */ });
           send({ type: 'ERROR', error: `No wallet for ${msg.environment}` });
         }
         break;
@@ -326,16 +365,19 @@ async function handlePopupMessage(
           const wasActive = info?.walletIndex === msg.index;
           await stateManager.deleteWallet(msg.index);
           if (wasActive) {
-            await walletManager.stopWallet();
+            await offscreenClient.request('STOP_WALLET', null);
             const newInfo = await stateManager.getActiveWalletInfo();
             if (newInfo) {
               const store = await stateManager.getStore();
               const entry = store.wallets[newInfo.walletIndex];
               const seed = stateManager.getSeed() ?? (entry ? new Uint8Array(entry.seed) : null);
               if (!seed) break;
-              await walletManager.initializeWallet(
-                seed, newInfo.environment, 0, newInfo.name,
-              );
+              await offscreenClient.request('INIT_WALLET', {
+                seed: Array.from(seed),
+                environment: newInfo.environment,
+                accountIndex: 0,
+                walletName: newInfo.name,
+              });
             }
           }
           send({ type: 'WALLET_DELETED', success: true });
@@ -360,127 +402,48 @@ async function handlePopupMessage(
       }
 
       case 'LOCK': {
-        await walletManager.stopWallet();
+        await offscreenClient.request('STOP_WALLET', null);
         stateManager.lock();
         break;
       }
 
       case 'GET_TX_HISTORY': {
-        const entries = await getTxHistory(0, 0, 50);
+        const entries = await offscreenClient.request('GET_TX_HISTORY', null) as TxHistoryEntry[];
         send({ type: 'TX_HISTORY', entries });
         break;
       }
 
       case 'GET_DIAGNOSTIC_BACKLOG': {
-        send({ type: 'DIAGNOSTIC_EVENTS_BATCH', events: getBacklog() });
+        const events = await offscreenClient.request('GET_DIAGNOSTIC_BACKLOG', null) as DiagnosticEvent[];
+        send({ type: 'DIAGNOSTIC_EVENTS_BATCH', events });
         break;
       }
 
       case 'CLEAR_ALL': {
-        await walletManager.stopWallet();
+        await offscreenClient.request('STOP_WALLET', null);
         await stateManager.clearAll();
-        await deleteAllSdkState();
         break;
       }
 
       case 'SEND_TRANSFER': {
-        const facade = walletManager.getFacade();
-        const keys = walletManager.getSecretKeys();
-        const keystore = walletManager.getKeystore();
-        const networkId = walletManager.getNetworkId();
-        if (!facade || !keys || !networkId) {
-          send({ type: 'TRANSFER_RESULT', result: { success: false, error: 'Wallet not initialized' } });
-          break;
-        }
-        const result = await executeTransfer(
-          facade,
-          {
-            tokenType: msg.params.tokenType,
-            tokenId: msg.params.tokenId,
-            amount: BigInt(msg.params.amount),
-            receiverAddress: msg.params.receiverAddress,
-          },
-          keys,
-          networkId,
-          keystore ?? undefined,
-        );
-        if (result.success) {
-          await addTxHistoryEntry({
-            txHash: result.txId,
-            status: 'pending',
-            timestamp: Date.now(),
-            accountIndex: 0,
-            type: 'transfer',
-            metadata: {
-              tokenType: msg.params.tokenType,
-              tokenId: msg.params.tokenId,
-              amount: msg.params.amount,
-              receiver: msg.params.receiverAddress,
-            },
-          });
-        }
+        const result = await offscreenClient.request('SEND_TRANSFER', msg.params) as TransactionResult;
         send({ type: 'TRANSFER_RESULT', result });
         break;
       }
 
       case 'DUST_REGISTER': {
-        const facade2 = walletManager.getFacade();
-        const keystore2 = walletManager.getKeystore();
-        if (!facade2 || !keystore2) {
-          send({ type: 'DUST_REGISTER_RESULT', result: { success: false, error: 'Wallet not initialized' } });
-          break;
-        }
-        const state2 = walletManager.getActiveWallet()?.latestState;
-        if (!state2) {
-          send({ type: 'DUST_REGISTER_RESULT', result: { success: false, error: 'Wallet state not available' } });
-          break;
-        }
-        const selectedUtxos = state2.unshielded.availableCoins.filter((uwm) => {
-          const id = `${String(uwm.utxo.intentHash)}:${uwm.utxo.outputNo}`;
-          return msg.utxoIds.includes(id);
-        });
-        const regResult = await executeDustRegistration(facade2, { nightUtxos: [...selectedUtxos] }, keystore2);
-        if (regResult.success) {
-          await addTxHistoryEntry({
-            txHash: regResult.txId,
-            status: 'pending',
-            timestamp: Date.now(),
-            accountIndex: 0,
-            type: 'dustReg',
-            metadata: { utxoCount: selectedUtxos.length },
-          });
-        }
+        const regResult = await offscreenClient.request('DUST_REGISTER', {
+          utxoIds: msg.utxoIds,
+          receiverAddress: msg.receiverAddress,
+        }) as TransactionResult;
         send({ type: 'DUST_REGISTER_RESULT', result: regResult });
         break;
       }
 
       case 'DUST_DEREGISTER': {
-        const facade3 = walletManager.getFacade();
-        const keystore3 = walletManager.getKeystore();
-        if (!facade3 || !keystore3) {
-          send({ type: 'DUST_DEREGISTER_RESULT', result: { success: false, error: 'Wallet not initialized' } });
-          break;
-        }
-        const state3 = walletManager.getActiveWallet()?.latestState;
-        if (!state3) {
-          send({ type: 'DUST_DEREGISTER_RESULT', result: { success: false, error: 'Wallet state not available' } });
-          break;
-        }
-        const deregUtxos = state3.unshielded.availableCoins.filter((uwm) => {
-          const id = `${String(uwm.utxo.intentHash)}:${uwm.utxo.outputNo}`;
-          return msg.utxoIds.includes(id);
-        });
-        const deregResult = await executeDustDeregistration(facade3, { nightUtxos: [...deregUtxos] }, keystore3);
-        if (deregResult.success) {
-          await addTxHistoryEntry({
-            txHash: deregResult.txId,
-            status: 'pending',
-            timestamp: Date.now(),
-            accountIndex: 0,
-            type: 'dustDereg',
-            metadata: { utxoCount: deregUtxos.length },
-          });
-        }
+        const deregResult = await offscreenClient.request('DUST_DEREGISTER', {
+          utxoIds: msg.utxoIds,
+        }) as TransactionResult;
         send({ type: 'DUST_DEREGISTER_RESULT', result: deregResult });
         break;
       }

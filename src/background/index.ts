@@ -1,63 +1,73 @@
-// Polyfill Node.js Buffer for Polkadot/Substrate SDK
-import { Buffer } from 'buffer';
-(globalThis as Record<string, unknown>)['Buffer'] = Buffer;
-
-// Polyfill Node.js assert for @subsquid/scale-codec (used by DustAddress encoding)
-if (!(globalThis as Record<string, unknown>)['assert']) {
-  const assertFn = (condition: unknown, message?: string) => {
-    if (!condition) throw new Error(message ?? 'Assertion failed');
-  };
-  assertFn.default = assertFn;
-  (globalThis as Record<string, unknown>)['assert'] = assertFn;
-}
-
-// Shim DOM globals that SDK deps and Vite's modulepreload expect in service workers
-if (typeof document === 'undefined') {
-  const noop = () => {};
-  const noopEl = {
-    setAttribute: noop,
-    appendChild: noop,
-    removeChild: noop,
-    getAttribute: () => null,
-    nonce: '',
-  };
-  (globalThis as Record<string, unknown>)['document'] = {
-    addEventListener: noop,
-    removeEventListener: noop,
-    createElement: () => ({ ...noopEl, onload: null, onerror: null, rel: '', href: '', crossOrigin: '' }),
-    head: { ...noopEl },
-    documentElement: { ...noopEl },
-    getElementsByTagName: () => [],
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    prerendering: false,
-  };
-}
-if (typeof window === 'undefined') {
-  (globalThis as Record<string, unknown>)['window'] = globalThis;
-}
-
-import { interceptSdkConsole } from './sdkConsoleInterceptor';
 import { emit, rehydrate, sessionId } from './diagnosticLogger';
 import { setupMessageRouter } from './messageRouter';
 import { startUpdateChecker } from './updateChecker';
+import * as offscreenClient from './offscreenClient';
+import * as stateManager from './stateManager';
 
-// Intercept SDK console output before any SDK imports
-interceptSdkConsole();
+async function ensureOffscreenReady(): Promise<void> {
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
+  });
 
-// Restore diagnostic events from previous SW lifecycle
-rehydrate().then(() => {
-  // Initialize message routing (triggers SDK imports via auto-unlock)
-  setupMessageRouter();
+  if (contexts.length === 0) {
+    await chrome.offscreen.createDocument({
+      url: 'src/offscreen/offscreen.html',
+      reasons: ['WORKERS' as chrome.offscreen.Reason],
+      justification: 'Host Midnight SDK (WalletFacade) with persistent WebSocket connections',
+    });
+  }
 
+  // The offscreen document initiates the port connection to the SW
+  // when its script loads. setupMessageRouter wires it to offscreenClient.
+  // Wait for the offscreen to signal READY over that port.
+  await offscreenClient.waitForReady();
+}
+
+async function autoUnlockWallet(): Promise<void> {
+  emit('info', 'wallet', 'Auto-unlock: checking for existing wallets');
+  const unlocked = await stateManager.autoUnlock();
+  if (!unlocked) {
+    emit('debug', 'wallet', 'Auto-unlock: no wallets found');
+    return;
+  }
+
+  const info = await stateManager.getActiveWalletInfo();
+  const seed = stateManager.getSeed();
+  if (!info || !seed) return;
+
+  try {
+    emit('info', 'wallet', 'Auto-unlock: initializing wallet', {
+      environment: info.environment,
+      name: info.name,
+    });
+    await offscreenClient.request('INIT_WALLET', {
+      seed: Array.from(seed),
+      environment: info.environment,
+      accountIndex: 0,
+      walletName: info.name,
+    });
+    emit('info', 'wallet', 'Auto-unlock: wallet ready');
+  } catch (err) {
+    emit('error', 'wallet', 'Auto-unlock failed', { error: String(err) });
+  }
+}
+
+// Register port listeners BEFORE creating the offscreen document,
+// so the offscreen's incoming port connection is handled immediately.
+setupMessageRouter();
+
+rehydrate().then(async () => {
   emit('info', 'sw', 'Service worker started', { sessionId });
   startUpdateChecker();
+  await ensureOffscreenReady();
+  await autoUnlockWallet();
 }).catch((err) => {
-  // If rehydrate fails, still start the router
-  setupMessageRouter();
-  emit('error', 'sw', 'Failed to rehydrate diagnostic events', { error: String(err) });
+  emit('error', 'sw', 'Failed during SW init', { error: String(err) });
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
-  emit('info', 'sw', `Extension ${details.reason}`, { reason: details.reason, previousVersion: details.previousVersion });
+  emit('info', 'sw', `Extension ${details.reason}`, {
+    reason: details.reason,
+    previousVersion: details.previousVersion,
+  });
 });

@@ -17,8 +17,8 @@ export function Header() {
   const isActive = status !== 'uninitialized';
 
   const rawName = walletState?.activeWalletName ?? '';
-  const headerLabel = /^Wallet [0-3]$/.test(rawName) && currentEnv === 'undeployed'
-    ? `Genesis W${rawName.slice(-1)}`
+  const headerLabel = /^Genesis W[0-3]$/.test(rawName) && currentEnv === 'undeployed'
+    ? rawName
     : currentEnv ? getEnvironmentLabel(currentEnv) : 'No Wallet';
 
   return (

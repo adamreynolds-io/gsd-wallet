@@ -17,7 +17,7 @@ type GroupedWallets = Record<Environment, WalletEntry[]>;
 const GENESIS_SEEDS = [0, 1, 2, 3];
 
 function isGenesis(w: WalletEntry, env: string): boolean {
-  return env === 'undeployed' && /^Wallet [0-3]$/.test(w.name);
+  return env === 'undeployed' && /^Genesis W[0-3]$/.test(w.name);
 }
 
 function displayName(
@@ -25,7 +25,7 @@ function displayName(
   positionInEnv: number,
   env: string,
 ): string {
-  if (isGenesis(w, env)) return `Genesis W${w.name.slice(-1)}`;
+  if (isGenesis(w, env)) return w.name;
   return `${getEnvironmentLabel(env as Environment)} ${positionInEnv}`;
 }
 
@@ -117,7 +117,7 @@ export function WalletMenu({
     const port = chrome.runtime.connect({ name: 'gsd-popup' });
     port.postMessage({
       type: 'ADD_WALLET',
-      name: `Wallet ${walletIndex}`,
+      name: `Genesis W${walletIndex}`,
       seed: bytes,
       environment: 'undeployed' as Environment,
     });

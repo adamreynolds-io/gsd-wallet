@@ -1,18 +1,17 @@
 # Midnight Wallet Integration Guide
 
-Guide for AI agents building or integrating Midnight wallet functionality. Based on lessons from building the [GSD Wallet](https://github.com/adamreynolds-io/gsd-wallet) Chrome extension.
+> **This is not official Midnight documentation.** This guide is a collection of lessons learned while building the [GSD Wallet](https://github.com/adamreynolds-io/gsd-wallet) Chrome extension. It documents platform constraints, silent failure modes, serialization traps, and gaps between the SDK's documented APIs and real-world integration. Where this guide conflicts with the canonical SDK reference, the SDK reference is authoritative.
 
-This guide covers what the SDK docs don't: platform constraints, silent failure modes, serialization traps, and the gaps between documented APIs and real-world integration.
+## Canonical SDK Reference
 
-## SDK Reference
+The only authoritative source for the Midnight Wallet SDK is:
 
-Complete SDK documentation is included in [docs/sdk-reference/](./sdk-reference/):
+- [docs/sdk-reference/](./sdk-reference/) -- snapshot from `@midnight-ntwrk/wallet-sdk` v3.0.0 (2026-03-28)
+  - [Architecture & Design](./sdk-reference/design.md) -- three-wallet model, facade pattern, variants
+  - [Package APIs](./sdk-reference/packages/) -- per-package reference (facade, shielded, unshielded, dust, HD, address format, etc.)
+  - [Code Examples](./sdk-reference/examples/) -- runnable snippets for initialization, transfers, balancing, swaps, dust operations
 
-- [Architecture & Design](./sdk-reference/design.md) -- three-wallet model, facade pattern, variants
-- [Package APIs](./sdk-reference/packages/) -- per-package reference (facade, shielded, unshielded, dust, HD, address format, etc.)
-- [Code Examples](./sdk-reference/examples/) -- runnable snippets for initialization, transfers, balancing, swaps, dust operations
-
-These docs are a snapshot from `@midnight-ntwrk/wallet-sdk` v3.0.0 (2026-03-28). For the latest, see the [midnight-wallet](https://github.com/midnightntwrk/midnight-wallet) repository.
+For the latest SDK docs, see the [midnight-wallet](https://github.com/midnightntwrk/midnight-wallet) repository.
 
 ---
 
@@ -199,7 +198,7 @@ facade.start(shieldedSecretKeys, dustSecretKey)
 
 **Performance trap:** If you `await facade.start()` before subscribing to state, the UI blocks for the entire connection + sync duration. Subscribe first, then start without awaiting. The state observable will emit updates as each wallet connects and syncs.
 
-**Reference:** `gsd-wallet/src/background/walletManager.ts:initializeWalletCore`
+**Reference:** `gsd-wallet/src/offscreen/walletManager.ts:initializeWalletCore`
 
 ---
 
@@ -207,9 +206,9 @@ facade.start(shieldedSecretKeys, dustSecretKey)
 
 ### Chrome Extension (MV3)
 
-#### Polyfills required in service worker
+#### Polyfills required in offscreen document
 
-The service worker has no Node.js APIs and no DOM. Three polyfills are mandatory:
+The SDK runs in the offscreen document (not the service worker). The offscreen document has `document` and `window` natively, but needs Node.js polyfills. Two polyfills are mandatory:
 
 ```typescript
 // 1. Buffer (for Polkadot/Substrate SDK used by wallet-sdk-node-client)
@@ -222,26 +221,11 @@ const assertFn = (condition: unknown, message?: string) => {
 };
 assertFn.default = assertFn;
 (globalThis as Record<string, unknown>)['assert'] = assertFn;
-
-// 3. DOM globals (for Vite modulepreload and SDK deps that call document.createElement)
-if (typeof document === 'undefined') {
-  const noop = () => {};
-  const noopEl = { setAttribute: noop, appendChild: noop, removeChild: noop, getAttribute: () => null, nonce: '' };
-  (globalThis as Record<string, unknown>)['document'] = {
-    addEventListener: noop, removeEventListener: noop,
-    createElement: () => ({ ...noopEl, onload: null, onerror: null, rel: '', href: '', crossOrigin: '' }),
-    head: { ...noopEl }, documentElement: { ...noopEl },
-    getElementsByTagName: () => [], querySelector: () => null, querySelectorAll: () => [],
-  };
-}
-if (typeof window === 'undefined') {
-  (globalThis as Record<string, unknown>)['window'] = globalThis;
-}
 ```
 
-These must be at the TOP of your service worker entry point, before any SDK imports.
+These must be at the TOP of the offscreen document entry point, before any SDK imports. DOM shims are not needed — the offscreen document is a full HTML page with native `document` and `window`.
 
-**Reference:** `gsd-wallet/src/background/index.ts`
+**Reference:** `gsd-wallet/src/offscreen/offscreen.ts`
 
 #### Manifest CSP for WASM
 
@@ -253,68 +237,57 @@ These must be at the TOP of your service worker entry point, before any SDK impo
 
 Without `wasm-unsafe-eval`, the ledger WASM module will fail to instantiate with no useful error message.
 
-#### Service worker lifecycle and persistent SDK storage
+#### Service worker lifecycle and the offscreen document
 
-Chrome terminates idle service workers after ~30 seconds. WebSocket connections (used by `@polkadot/api` for node/indexer communication) do NOT count as activity — Chrome will kill the SW even with active WebSockets.
+Chrome terminates idle service workers after ~30 seconds. WebSocket connections (used by `@polkadot/api` for node/indexer communication) do NOT count as activity.
 
-**What does NOT keep the SW alive:**
-- Offscreen document with persistent port — tested: SW still dies at ~60s
-- `chrome.alarms` — minimum 30s period, handler runs too fast to extend lifetime
-- `setInterval` in SW — does not prevent termination
-- `chrome.storage.session` writes — periodic writes don't prevent kills
-- Active WebSocket connections — Chrome ignores these for SW lifecycle
+**The fix: run the SDK in an offscreen document.** The offscreen document is a persistent extension page that Chrome does not garbage-collect. It maintains WebSocket connections indefinitely without keepalive hacks. The service worker becomes a thin message router — it can freely die and restart without affecting the SDK.
 
-**What DOES keep the SW alive:**
-- Popup or full-tab extension page open with active port
-- DevTools inspector attached (dev-only, not a user solution)
+The offscreen document initiates a port connection to the SW on load. When the SW restarts, the offscreen detects the port disconnect and reconnects to the new SW instance automatically.
 
-**The real fix: Persistent SDK storage.** Instead of fighting the SW lifecycle, persist the SDK's wallet state to IndexedDB so each restart resumes from the last checkpoint. The SDK provides serialization/restore on all three wallet types:
+**Note:** `chrome.storage` APIs are not available in offscreen documents. State caching must be done by the SW (which receives state broadcasts over the port).
+
+#### Persistent SDK storage (checkpoints)
+
+The SDK provides serialization/restore on all three wallet types. Checkpoints allow sync to resume after a full browser restart (the only scenario where the offscreen document is lost).
 
 ```typescript
-// Serialize — call periodically during sync (e.g. every 10s)
+// Serialize
 const [shielded, unshielded, dust] = await Promise.all([
-  facade.shielded.serializeState(),   // Returns string
-  facade.unshielded.serializeState(), // Returns string
-  facade.dust.serializeState(),       // Returns string
+  facade.shielded.serializeState(),
+  facade.unshielded.serializeState(),
+  facade.dust.serializeState(),
 ]);
-const txHistory = txHistoryStorage.serialize(); // Also string
-
-// Persist to IndexedDB (keyed by environment + account)
+const txHistory = txHistoryStorage.serialize();
 await db.put('sdkState', { shieldedState, unshieldedState, dustState, txHistory, savedAt, sdkVersion });
 ```
 
 ```typescript
 // Restore — on wallet initialization, check for checkpoint first
 const checkpoint = await db.get('sdkState', key);
-
 if (checkpoint) {
-  const txHistoryStorage = InMemoryTransactionHistoryStorage.fromSerialized(checkpoint.txHistory);
   const facade = await WalletFacade.init({
-    configuration: { ...config, txHistoryStorage },
+    configuration: { ...config, txHistoryStorage: InMemoryTransactionHistoryStorage.fromSerialized(checkpoint.txHistory) },
     shielded: (cfg) => ShieldedWallet(cfg).restore(checkpoint.shieldedState),
     unshielded: (cfg) => UnshieldedWallet(cfg).restore(checkpoint.unshieldedState),
     dust: (cfg) => DustWallet(cfg).restore(checkpoint.dustState),
     provingService: () => makeServerProvingService({ ... }),
   });
-} else {
-  // Fresh init with startWithSeed/startWithPublicKey (existing code)
 }
 ```
 
 **Checkpointing strategy:**
-- Save every 10 seconds during sync (throttled, fire-and-forget)
 - Save when `isSynced` transitions to `true`
 - Save before `facade.stop()` on wallet lock/shutdown
 - Never block the UI or state emission on checkpoint writes
 - Store the SDK package version — discard checkpoints after SDK upgrades
+- Periodic saves are unnecessary — the offscreen document is persistent, so the only data loss scenario is a full browser crash
 
-**Error handling:** Wrap restore in try/catch. If deserialization fails (corrupt data, schema change), clear the checkpoint and fall back to fresh sync. Checkpoint writes are best-effort — failures are logged but never crash the wallet.
+**Error handling:** Wrap restore in try/catch. If deserialization fails (corrupt data, schema change), clear the checkpoint and fall back to fresh sync.
 
-**Scoping:** Key checkpoints by `${environment}:${accountIndex}` so each wallet/network combination has independent state.
+**Scoping:** Key checkpoints by `${environment}:${accountIndex}:${walletId}` so each wallet/network combination has independent state. Derive `walletId` from a hash of the seed (never raw seed bytes) to avoid leaking key material in storage keys or logs.
 
-**Tested on mainnet:** With ~87k shielded + ~87k dust events, the wallet completes full sync across multiple SW restarts (Chrome kills the SW every ~60s), each time resuming from the last 10-second checkpoint. Without persistent storage, this sync never completes.
-
-**Reference:** `gsd-wallet/src/background/sdkCheckpoint.ts`, `gsd-wallet/src/background/walletManager.ts:initializeWalletCore`, `gsd-wallet/src/shared/storage.ts`
+**Reference:** `gsd-wallet/src/offscreen/sdkCheckpoint.ts`, `gsd-wallet/src/offscreen/walletManager.ts:initializeWalletCore`, `gsd-wallet/src/shared/storage.ts`
 
 #### Popup height limit
 
@@ -463,7 +436,7 @@ try {
 }
 ```
 
-**Reference:** `gsd-wallet/src/background/walletManager.ts:serializeState`
+**Reference:** `gsd-wallet/src/offscreen/walletManager.ts:serializeState`
 
 ---
 
@@ -474,10 +447,12 @@ If building a wallet that injects into web pages (Chrome extension or Electron):
 ### Architecture
 
 ```
-Page (main world)          Content Script (isolated)       Service Worker
-  inpage.js                  content-script.ts               messageRouter.ts
-  window.midnight[uuid]  ←→  persistent port bridge     ←→  connectedApiHandler.ts
+Page (main world)       Content Script (isolated)      Service Worker           Offscreen Document
+  inpage.js               content-script.ts              messageRouter.ts         connectedApiHandler.ts
+  window.midnight[uuid] ←→ persistent port bridge    ←→ forwards via port    ←→ WalletFacade + API handlers
 ```
+
+The service worker validates DApp sessions and forwards API calls to the offscreen document over a typed request/response port protocol. The offscreen document hosts the `WalletFacade` and executes all SDK operations (balancing, signing, proving).
 
 ### Injection pattern
 
@@ -557,16 +532,16 @@ const timeout = setTimeout(() => {
 
 ### Service worker race condition
 
-When Chrome restarts the service worker, `autoUnlock` reinitializes the wallet. API handlers must wait for this to complete:
+When Chrome restarts the service worker, `autoUnlock` reinitializes the wallet via the offscreen document. DApp API calls must wait for the offscreen to signal readiness:
 
 ```typescript
-// In your API handler, before using the facade:
-await walletManager.waitForReady();
+// In the SW DApp handler, before forwarding to offscreen:
+await offscreenClient.waitForReady();
 ```
 
-Without this, API calls can hit a dead or partially-initialized facade and hang indefinitely.
+The offscreen document's API handler also gates on `walletManager.waitForReady()` to avoid racing with reinitialization.
 
-**Reference:** `gsd-wallet/src/background/walletManager.ts:waitForReady`, `gsd-wallet/src/background/connectedApiHandler.ts`
+**Reference:** `gsd-wallet/src/background/messageRouter.ts:handleDappRequest`, `gsd-wallet/src/offscreen/connectedApiHandler.ts:handleApiCall`
 
 ---
 
@@ -687,16 +662,26 @@ Building a wallet on the Midnight SDK requires deep observability. The SDK uses 
 ### Architecture
 
 ```
-SDK (@polkadot/api) ──console.warn/error──→ sdkConsoleInterceptor ──emit()──→ diagnosticLogger
-                                                                                    │
-walletManager ──emit()──→ diagnosticLogger ←──rehydrate()── chrome.storage.session  │
-                                │                                                    │
-                                ├── in-memory buffer (2000 events, real-time)        │
-                                ├── chrome.storage.session (persists across SW kills) │
-                                └── storage.onChanged ──→ popup DiagnosticsPanel     │
-                                                          ├── filterable by level/category
-                                                          └── NDJSON export with ISO timestamps
+OFFSCREEN DOCUMENT:
+  SDK (@polkadot/api) ──console.warn/error──→ sdkConsoleInterceptor ──emit()──→ offscreen diagnosticLogger
+  walletManager ──emit()──→ offscreen diagnosticLogger                                │
+                                │                                                      │
+                                ├── in-memory buffer (2000 events)                     │
+                                └── broadcast via port ──→ SERVICE WORKER              │
+                                                              │                        │
+SERVICE WORKER:                                               ▼                        │
+  messageRouter ──emit()──→ SW diagnosticLogger               │                        │
+                                │                              │                        │
+                                ├── in-memory buffer           │                        │
+                                ├── chrome.storage.session     │                        │
+                                └── merges offscreen events ───┘                        │
+                                        │                                               │
+                                        └── relay to popup ports ──→ DiagnosticsPanel   │
+                                                                      ├── filterable    │
+                                                                      └── NDJSON export │
 ```
+
+Two diagnostic loggers exist: one in the offscreen document (SDK events, wallet lifecycle) and one in the SW (routing, popup connections). The offscreen logger broadcasts events to the SW over the port. The SW merges both streams and relays to popup ports. Only the SW logger persists to `chrome.storage.session` — the offscreen document does not have access to `chrome.storage` APIs.
 
 ### Event categories
 
@@ -715,7 +700,9 @@ walletManager ──emit()──→ diagnosticLogger ←──rehydrate()── 
 
 ### Persistence
 
-Events are persisted to `chrome.storage.session` via debounced writes (500ms or every 10 events). On SW startup, `rehydrate()` restores the buffer. This survives Chrome's aggressive SW lifecycle (kill after ~30s idle). Events are cleared when the browser closes, which is appropriate for diagnostic data.
+SW-side events are persisted to `chrome.storage.session` via debounced writes. On SW startup, `rehydrate()` restores the buffer. Events are cleared when the browser closes, which is appropriate for diagnostic data.
+
+Offscreen-side events are kept in-memory only — the offscreen document is persistent, so this is safe during a session. They are broadcast to the SW over the port for relay to the popup. `chrome.storage` APIs are not available in offscreen documents.
 
 Each SW lifecycle gets a unique `sessionId` (UUID) — visible in the "Service worker started" event — so you can identify restarts in the event stream.
 
@@ -751,13 +738,13 @@ function isSdkMessage(msg: string): boolean {
 
 This captures errors like `RPC-CORE: subscribeRuntimeVersion(): disconnected from wss://rpc.mainnet.midnight.network/: 1000:: Normal Closure` which are invisible in every other Midnight wallet.
 
-**Reference:** `gsd-wallet/src/background/sdkConsoleInterceptor.ts`
+**Reference:** `gsd-wallet/src/offscreen/sdkConsoleInterceptor.ts`
 
 ### Diagnostic event flush timing
 
-Events are flushed to `chrome.storage.session` after 100ms or 3 accumulated events, whichever comes first. This provides near-instant delivery to the popup via `chrome.storage.onChanged` while batching writes to avoid overwhelming storage I/O.
+SW-side events are flushed to `chrome.storage.session` after 100ms or 3 accumulated events, whichever comes first. On SW startup, `rehydrate()` restores persisted events from the previous lifecycle.
 
-On service worker startup, `rehydrate()` restores persisted events from the previous lifecycle and continues the `nextId` counter so event IDs are monotonically increasing across restarts. Each lifecycle gets a unique `sessionId` (UUID) visible in the "Service worker started" event, so restarts are identifiable in the log.
+Offscreen-side events are broadcast immediately to the SW over the port (no batching). The SW relays them to connected popup ports and merges them into its own diagnostic stream.
 
 ### Calculating overall sync percentage
 
@@ -789,13 +776,13 @@ On mainnet with ~87k shielded and ~87k dust events, first sync takes several min
 | Address shows as empty string | `MidnightBech32m.encode()` threw (address not yet synced) | Wrap in try-catch, show placeholder |
 | UTXO hash "Not found in indexer" | `intentHash` is not a transaction hash | Don't use intent hash as indexer lookup key |
 | Popup scrolls past bottom | Chrome enforces viewport height limit (~600px) | Cap popup height; offer "Open in Full Tab" |
-| Service worker dies mid-sync | Chrome kills idle SWs after ~30s; WebSockets don't count as activity | Persist SDK state to IndexedDB; restore from checkpoint on restart (see section 4) |
-| Sync restarts from 0 on every SW restart | `InMemoryTransactionHistoryStorage` and wallet state are in-memory only | Implement persistent SDK storage with `serializeState()`/`restore()` and `InMemoryTransactionHistoryStorage.serialize()`/`fromSerialized()` |
-| Popup shows stale data after close/reopen | Port message delivery unreliable in MV3 | Use `chrome.storage.onChanged` for live updates instead of port broadcasts |
+| Service worker dies mid-sync | Chrome kills idle SWs after ~30s; WebSockets don't count as activity | Run the SDK in an offscreen document (see section 13). The offscreen is persistent — SW restarts don't affect sync. |
+| Sync restarts from 0 on browser restart | `InMemoryTransactionHistoryStorage` and wallet state are in-memory only | Implement persistent SDK storage with `serializeState()`/`restore()` and `InMemoryTransactionHistoryStorage.serialize()`/`fromSerialized()` (see section 4) |
+| Popup shows stale data after close/reopen | Port message delivery unreliable in MV3 | SW caches state to `chrome.storage.session` on every offscreen broadcast; popup reads cache on connect and watches `chrome.storage.onChanged` as fallback |
 | Sync percentage inflated (61% shown, actual 43%) | Averaging per-wallet percentages equally | Use `totalApplied / totalHighest` across all wallets |
 | API call hangs after SW restart | `autoUnlock` reinitializes facade while API handler uses old ref | Gate API handlers with `waitForReady()` before using facade |
 | DApp connects before user accepts disclaimer | Popup gate doesn't block service worker DApp handler | Check disclaimer in both popup AND DApp request handler independently |
-| `balanceUnboundTransaction` hangs for contract calls | Dust balancer deterministic `IntentSegmentIdCollision` + 38s synchronous event loop block kills SW | Upstream SDK bug — see section 13 for full diagnosis. No GSD wallet fix possible. |
+| `balanceUnboundTransaction` hangs for contract calls | Dust balancer deterministic `IntentSegmentIdCollision` + 38s synchronous event loop block | Upstream SDK bug — see section 13. Running facade in offscreen document prevents SW death but Chrome may show "page unresponsive" for the offscreen during the 38s computation. |
 | `HDWallet.fromSeed` returns but wallet fails later | Didn't check `.type === 'seedOk'` | Always check tagged return types |
 | Facade created but never syncs | Forgot to call `facade.start()` after `init()` | `.init()` and `.start()` are separate steps |
 | DApps can't discover wallet | Missing `midnight#ready` event dispatch | Dispatch `CustomEvent('midnight#ready')` after injection |
@@ -825,61 +812,72 @@ What the existing Midnight documentation covers vs what you actually need:
 | **React Native limitations** | — | — | **Gap** — no explicit statement of non-support |
 | **Chrome popup constraints** | — | — | **Gap** — 600px limit not documented |
 | **SW lifecycle & persistent storage** | — | — | **Addressed here** — checkpoint pattern with `serializeState()`/`restore()` |
-| **Facade computation model vs Chrome SW** | — | — | **Gap** — SDK assumes unbounded event loop blocking is safe; Chrome kills unresponsive SWs at ~30s. See section 14 |
-| **Dust balancer segment ID collision** | — | — | **Gap** — deterministic `IntentSegmentIdCollision` for all contract call transactions via DApp connector. See section 14 |
-| **Offscreen document for facade** | WASM prover example uses `makeWasmProvingService()` | — | **Gap** — SDK docs show WASM prover factory but don't address that the entire facade must run outside the SW for Chrome extensions |
+| **Facade computation model vs Chrome SW** | — | — | **Addressed here** — SDK assumes unbounded event loop blocking is safe; Chrome kills unresponsive SWs at ~30s. Fix: run facade in offscreen document (section 13) |
+| **Dust balancer segment ID collision** | — | — | **Gap** — deterministic `IntentSegmentIdCollision` for all contract call transactions via DApp connector. Upstream fix required. See section 13 |
+| **Offscreen document for facade** | WASM prover example uses `makeWasmProvingService()` | — | **Addressed here** — SDK docs show WASM prover factory but don't address that the entire facade must run outside the SW for Chrome extensions. See section 13 for implemented architecture. |
 
 ---
 
 ## 12. Reference Implementation
 
-> **Note:** The reference implementation currently runs the facade in the service worker. Section 13 describes the required migration to the offscreen document.
+The GSD Wallet runs the facade in an offscreen document with the service worker as a thin message router. Every pattern in this guide has a working implementation:
 
-The GSD Wallet provides working implementations of every pattern in this guide:
+**Service worker (thin router):**
 
-| Pattern | File | Key function/section |
-|---------|------|---------------------|
-| Service worker polyfills | `src/background/index.ts` | Lines 1-38 |
-| Facade initialization (two-phase, with checkpoint restore) | `src/background/walletManager.ts` | `initializeWalletCore()` — loads checkpoint, restores or fresh init, Phase 2: `facade.start()` in background |
-| Persistent SDK storage (checkpoint) | `src/background/sdkCheckpoint.ts` | `saveCheckpoint()`, `loadCheckpoint()`, `clearCheckpoint()` — IndexedDB-backed state persistence |
-| IndexedDB schema (v2, with sdkState store) | `src/shared/storage.ts` | `getSdkState()`, `saveSdkState()`, `deleteSdkState()`, `deleteAllSdkState()` |
-| SW race condition guard | `src/background/walletManager.ts` | `waitForReady()` |
-| State serialization | `src/background/walletManager.ts` | `serializeState()` |
-| Per-wallet sync progress | `src/popup/pages/Dashboard.tsx` | `SyncDetailRow` — always-visible rows showing applied/total per wallet |
-| Sync stall detection | `src/background/walletManager.ts` | Independent timer detects 30s of no progress, broadcasts `stalled` phase |
-| Granular sync diagnostics | `src/background/walletManager.ts` | `sync:phase`, `sync:connected`, `sync:progress` events |
-| Persistent diagnostic logger | `src/background/diagnosticLogger.ts` | `emit()`, `rehydrate()` — 2000-event ring buffer persisted to `chrome.storage.session` |
-| SDK console interception | `src/background/sdkConsoleInterceptor.ts` | Captures `@polkadot/api` RPC-CORE errors and WebSocket disconnects |
-| Diagnostic event broadcasting | `src/background/messageRouter.ts` | `onEvent` → `DIAGNOSTIC_EVENT` to ports |
-| Log export | `src/popup/components/DiagnosticsPanel.tsx` | `downloadLogs()` — NDJSON export with ISO timestamps |
-| Message protocol types | `src/shared/messages.ts` | `PopupRequest`, `PopupResponse` |
-| DApp connector (inpage) | `src/content-script/inpage.ts` | Full file (120s timeout) |
-| Content script bridge | `src/content-script/content-script.ts` | Full file |
-| DApp API handler | `src/background/connectedApiHandler.ts` | `handleApiCall()` with structured emit |
-| Explorer GraphQL queries | `src/shared/indexerQuery.ts` | `fetchTxDetail()`, `fetchBlockDetail()`, `fetchContractDetail()` |
-| Diagnostics panel UI | `src/popup/components/DiagnosticsPanel.tsx` | Filters, auto-scroll, expand/collapse |
+| Pattern | File | Key function |
+|---------|------|-------------|
+| SW entry + offscreen lifecycle | `src/background/index.ts` | `ensureOffscreenReady()`, `autoUnlockWallet()` |
+| Message routing (popup + DApp) | `src/background/messageRouter.ts` | `setupMessageRouter()`, `handlePopupMessage()`, `handleDappRequest()` |
+| Offscreen port client | `src/background/offscreenClient.ts` | `acceptPort()`, `request()`, `waitForReady()` |
+| Wallet store CRUD | `src/background/stateManager.ts` | `addWallet()`, `switchWallet()`, `autoUnlock()` |
+| SW diagnostic logger | `src/background/diagnosticLogger.ts` | `emit()`, `rehydrate()` — persists to `chrome.storage.session` |
+| Update checker | `src/background/updateChecker.ts` | `startUpdateChecker()` |
+
+**Offscreen document (SDK host):**
+
+| Pattern | File | Key function |
+|---------|------|-------------|
+| SDK host entry + port protocol | `src/offscreen/offscreen.ts` | `handleRequest()`, `connectToServiceWorker()` |
+| Facade lifecycle + state serialization | `src/offscreen/walletManager.ts` | `initializeWallet()`, `stopWallet()`, `serializeState()` |
+| DApp API handler (17 methods) | `src/offscreen/connectedApiHandler.ts` | `handleApiCall()` |
+| Persistent SDK storage (checkpoint) | `src/offscreen/sdkCheckpoint.ts` | `saveCheckpoint()`, `loadCheckpoint()` |
+| SDK console interception | `src/offscreen/sdkConsoleInterceptor.ts` | `interceptSdkConsole()` |
+| Offscreen diagnostic logger | `src/offscreen/diagnosticLogger.ts` | `emit()`, `setBroadcastFn()` — in-memory, broadcasts to SW |
+
+**Shared:**
+
+| Pattern | File | Key function |
+|---------|------|-------------|
+| Message protocol types | `src/shared/messages.ts` | `PopupRequest`, `PopupResponse`, `OffscreenRequest`, `OffscreenBroadcast` |
+| IndexedDB schema | `src/shared/storage.ts` | `getSdkState()`, `saveSdkState()`, `getTxHistory()` |
 | Environment configuration | `src/shared/environments.ts` | `ENVIRONMENTS` map |
-| Async wallet creation | `src/background/messageRouter.ts` | `ADD_WALLET` case |
-| Clear wallet with state guard | `src/popup/hooks/useWalletState.ts` | `hasVault !== false` guard |
-| Chrome manifest (MV3 + WASM) | `manifest.json` | Full file |
+
+**Popup + content script (unchanged):**
+
+| Pattern | File |
+|---------|------|
+| DApp connector (inpage) | `src/content-script/inpage.ts` |
+| Content script bridge | `src/content-script/content-script.ts` |
+| Popup state + reconnection | `src/popup/hooks/useWalletState.ts` |
+| Per-wallet sync progress | `src/popup/pages/Dashboard.tsx` |
+| Diagnostics panel | `src/popup/components/DiagnosticsPanel.tsx` |
 
 Repository: `https://github.com/adamreynolds-io/gsd-wallet`
 
 ---
 
-## 13. Facade Must Run Outside the Service Worker
+## 13. Offscreen Document Architecture
 
-> **Not covered in SDK reference.** The SDK design docs (`docs/sdk-reference/design.md`) describe the variant/capability/SubscriptionRef architecture but assume a Node.js or Electron runtime. The SDK examples (`docs/sdk-reference/examples/wasm-prover.ts`) show `makeWasmProvingService()` as the production prover factory but don't address where the facade should live in a Chrome extension. This section fills that gap.
+> **Not covered in SDK reference.** The SDK design docs (`docs/sdk-reference/design.md`) describe the variant/capability/SubscriptionRef architecture but assume a Node.js or Electron runtime. The SDK examples (`docs/sdk-reference/examples/wasm-prover.ts`) show `makeWasmProvingService()` as the production prover factory but don't address where the facade should live in a Chrome extension. This section documents the implemented solution.
 
 ### The problem
 
-The wallet SDK's `WalletFacade` runs long computations synchronously on the Effect runtime without yielding to the event loop. This is safe in Node.js and Electron. In a Chrome extension service worker, it is fatal.
+The wallet SDK's `WalletFacade` runs long computations synchronously on the Effect runtime without yielding to the event loop. This is safe in Node.js and Electron. In a Chrome extension service worker, it causes two problems:
 
-Chrome terminates any service worker whose event loop is blocked for approximately 30 seconds. The SDK's dust balancer (`transactingCapability.balanceTransactions()`) runs ~38 seconds of synchronous computation for contract call transactions. Chrome kills the service worker before the operation completes or errors. The DApp receives no response — a silent hang.
+1. **SW lifecycle**: Chrome terminates idle service workers after ~30 seconds. The SDK maintains WebSocket connections that don't count as activity.
+2. **Event loop blocking**: The SDK's dust balancer (`transactingCapability.balanceTransactions()`) runs ~38 seconds of synchronous computation for contract call transactions.
 
-This was verified by instrumenting the SDK's three balancers (shielded, unshielded, dust) with trace events. The trace shows all three semaphores are acquired instantly, the `blockData()` indexer fetch returns immediately, and the stall is entirely inside the dust balancer's synchronous computation phase. See [gsd-wallet#10](https://github.com/adamreynolds-io/gsd-wallet/issues/10) for the full evidence chain.
-
-Additionally, the dust balancer has a deterministic `IntentSegmentIdCollision` bug: it creates a fee intent on the same segment ID as the contract call intent in the input transaction. This collision occurs for every contract call transaction (not deploys, which use the fixed guaranteed segment). The collision is only detected after ~38 seconds of proving work, making the failure both slow and guaranteed.
+Additionally, the dust balancer has a deterministic `IntentSegmentIdCollision` bug: it creates a fee intent on the same segment ID as the contract call intent in the input transaction. This collision occurs for every contract call transaction (not deploys, which use the fixed guaranteed segment). The collision is only detected after ~38 seconds of computation, making the failure both slow and guaranteed. See [gsd-wallet#10](https://github.com/adamreynolds-io/gsd-wallet/issues/10) for the full evidence chain.
 
 ### Why `setTimeout` and `Promise.race` don't help
 
@@ -895,94 +893,68 @@ const recipe = await Promise.race([
 
 This fails because `setTimeout` callbacks are dispatched on the same event loop that the facade computation is blocking. While the dust balancer runs synchronously for 38 seconds, no `setTimeout` callback can fire. The timeout and the computation share a single thread — neither can interrupt the other.
 
-### Required architecture: service worker as supervisor
+### Implemented architecture: offscreen document as SDK host
 
-The facade must run in a separate execution context with its own event loop. In Chrome MV3, the only available option is an **offscreen document**.
+The facade runs in an offscreen document with its own event loop. The service worker is a thin message router.
 
 ```
-DApp <-> content script <-> service worker (supervisor) <-> offscreen document (facade)
+DApp <-> content script <-> service worker (router) <-> offscreen document (SDK host)
                                  |                               |
-                            message routing                 WalletFacade
-                            timeout enforcement             balancing, proving
-                            state cache for UI              sync, state subscriptions
-                            keepalive                       own event loop
+                            session management              WalletFacade
+                            port forwarding                 balancing, proving
+                            state cache (session storage)   sync, state subscriptions
+                            popup port relay                own event loop
 ```
 
-The service worker never calls the facade directly. It sends a message to the offscreen document, starts a timeout, and waits for a response. Because the service worker's event loop is free, `setTimeout` works normally.
+The offscreen document initiates a port connection to the SW on load (not the other way around — this avoids a race where the SW tries to connect before the offscreen script has loaded). The SW accepts the port and uses it for all SDK operations.
+
+All SDK operations use a typed request/response protocol over the port:
 
 ```typescript
-// Service worker — timeout works because event loop is free
-async function balanceViaOffscreen(txHex: string): Promise<string> {
-  const id = crypto.randomUUID();
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error('Balance timed out after 60s'));
-    }, 60_000);
-
-    const handler = (msg: OffscreenMessage) => {
-      if (msg.id !== id) return;
-      clearTimeout(timeout);
-      offscreenPort.onMessage.removeListener(handler);
-      if (msg.error) reject(new Error(msg.error));
-      else resolve(msg.result);
-    };
-
-    offscreenPort.onMessage.addListener(handler);
-    offscreenPort.postMessage({ id, type: 'balance', txHex });
-  });
-}
+// SW sends request with UUID, offscreen responds with matching ID
+interface OffscreenRequest { id: string; type: OffscreenRequestType; payload: unknown; }
+interface OffscreenResponse { id: string; type: 'RESPONSE' | 'ERROR'; payload: unknown; }
+interface OffscreenBroadcast { id: null; type: 'STATE_UPDATE' | 'DIAGNOSTIC_EVENT' | 'HEARTBEAT' | 'READY'; payload: unknown; }
 ```
 
-The offscreen document has no lifecycle limit from Chrome — it stays alive as long as the service worker keeps it open. If it crashes, Chrome notifies the service worker via the port disconnect event.
+Request types: `INIT_WALLET`, `STOP_WALLET`, `GET_STATE`, `DAPP_API_CALL`, `SEND_TRANSFER`, `DUST_REGISTER`, `DUST_DEREGISTER`, `GET_TX_HISTORY`, `GET_DIAGNOSTIC_BACKLOG`.
 
-### What moves to the offscreen document
+The SW maintains a `Map<id, {resolve, reject}>` for pending requests with 120-second timeouts. Broadcasts (id=null) are relayed to popup ports.
 
-| Component | Currently | Should be |
-|-----------|-----------|-----------|
-| `WalletFacade.init()` + full facade instance | Service worker | Offscreen document |
-| Shielded/unshielded/dust wallets | Service worker | Offscreen document |
-| Proving service (`makeServerProvingService` or `makeWasmProvingService`) | Service worker | Offscreen document |
-| Sync service + state subscriptions | Service worker | Offscreen document |
-| `balanceUnboundTransaction`, `finalizeRecipe`, all transacting | Service worker | Offscreen document |
-| Message routing (DApp connector, popup) | Service worker | Service worker (stays) |
-| Timeout enforcement | Service worker | Service worker (stays) |
-| State cache for popup UI | Service worker | Service worker (receives snapshots from offscreen) |
-| Checkpoint triggers | Service worker | Service worker (sends save command to offscreen) |
+### What lives where
 
-### Heartbeat protocol for proving
+| Component | Location |
+|-----------|----------|
+| `WalletFacade` + all three sub-wallets | Offscreen document |
+| Proving service (`makeServerProvingService`) | Offscreen document |
+| `balanceUnboundTransaction`, `finalizeRecipe`, all transacting | Offscreen document |
+| Sync + state subscriptions + stall detection | Offscreen document |
+| SDK console interception + offscreen diagnostics | Offscreen document |
+| Checkpoint save/load | Offscreen document (IndexedDB is same-origin) |
+| Message routing (DApp + popup) | Service worker |
+| DApp session management | Service worker |
+| State cache for popup (`chrome.storage.session`) | Service worker |
+| Wallet store CRUD (seeds, environments) | Service worker |
+| SW diagnostic logger (persisted) | Service worker |
 
-When the SDK takes on WASM proving (via `makeWasmProvingService()`), operations can take minutes. The offscreen document should send periodic heartbeats so the service worker can distinguish "still working" from "stalled":
+### Offscreen document constraints
+
+- **No `chrome.storage` APIs** — `chrome.storage.session` and `chrome.storage.local` are undefined in offscreen documents. State caching must be done by the SW.
+- **Only `chrome.runtime`** — Port connections and `sendMessage` work. No other Chrome APIs.
+- **Polyfills needed** — `Buffer` and `assert` (but not DOM shims — the offscreen has real `document`/`window`).
+- **Web Workers are safe** — Workers spawned by the offscreen document live as long as the offscreen document. They are not subject to SW lifecycle management. This is the path for future WASM proving.
+
+### Reconnection on SW restart
+
+When Chrome kills and restarts the SW, the offscreen document's port disconnects. The offscreen detects this and reconnects after 500ms:
 
 ```typescript
-// Offscreen document
-async function proveWithHeartbeat(id: string, recipe: BalancingRecipe) {
-  const heartbeat = setInterval(() => {
-    port.postMessage({ id, type: 'heartbeat', phase: 'proving' });
-  }, 5_000);
-  try {
-    const result = await facade.finalizeRecipe(recipe);
-    port.postMessage({ id, type: 'result', result: serialize(result) });
-  } finally {
-    clearInterval(heartbeat);
-  }
-}
-
-// Service worker
-const HEARTBEAT_TIMEOUT = 15_000;
-let lastHeartbeat = Date.now();
-const monitor = setInterval(() => {
-  if (Date.now() - lastHeartbeat > HEARTBEAT_TIMEOUT) {
-    clearInterval(monitor);
-    reject(new Error('Proving stalled — no heartbeat for 15s'));
-  }
-}, 5_000);
+port.onDisconnect.addListener(() => {
+  setTimeout(connectToServiceWorker, 500);
+});
 ```
 
-### The SDK's factory pattern supports this
-
-`WalletFacade.init()` accepts factory functions for each wallet and the proving service. The facade doesn't care which execution context instantiates it. The factories work identically in a service worker or an offscreen document — they only require `fetch`, `WebSocket`, and `IndexedDB`, all of which are available in offscreen documents.
-
-The state bridge is straightforward: the offscreen document subscribes to `facade.state()` and posts serialized snapshots to the service worker on each emission. This is the same serialization already implemented for `chrome.storage.session` writes in the current architecture — the serialization just crosses a `postMessage` boundary instead of happening in-process.
+The new SW has `setupMessageRouter()` running synchronously at load time, so it's ready to accept the incoming port. The SW then calls `ensureOffscreenReady()` → `waitForReady()` which resolves when the offscreen broadcasts `READY`.
 
 ### Upstream SDK issues (not addressable from wallet side)
 

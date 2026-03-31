@@ -18,7 +18,6 @@ import type {
   SerializedWalletState,
   SerializedUtxo,
 } from '@shared/types';
-import { NIGHT_TOKEN_ID } from '@shared/constants';
 import { getEnvironmentConfig } from '@shared/environments';
 import { emit } from './diagnosticLogger';
 import {
@@ -26,26 +25,6 @@ import {
   loadCheckpoint,
   clearCheckpoint,
 } from './sdkCheckpoint';
-
-async function ensureOffscreenDocument(): Promise<void> {
-  const contexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
-  });
-  if (contexts.length > 0) {
-    emit('debug', 'sw', 'Offscreen document already exists');
-    return;
-  }
-  try {
-    await chrome.offscreen.createDocument({
-      url: 'src/offscreen/offscreen.html',
-      reasons: ['WORKERS' as chrome.offscreen.Reason],
-      justification: 'Keep service worker alive during wallet sync via periodic ping',
-    });
-    emit('info', 'sw', 'Offscreen keepalive document created');
-  } catch (e) {
-    emit('error', 'sw', 'Failed to create offscreen document', { error: String(e) });
-  }
-}
 
 export interface WalletSecretKeys {
   shieldedSecretKeys: ledger.ZswapSecretKeys;
@@ -79,7 +58,7 @@ export function getActiveWallet(): ActiveWallet | null {
 /**
  * Wait for any in-progress wallet initialization to complete.
  * API handlers must call this before using the facade to avoid
- * racing with service worker auto-unlock reinitialization.
+ * racing with reinitialization.
  */
 export async function waitForReady(): Promise<void> {
   if (initializingPromise) {
@@ -135,8 +114,6 @@ function serializeState(
     unshieldedBalances[tokenId] = String(amount);
   }
 
-  // Use isConnected + highestIndex to determine real sync status
-  // If highestIndex is 0 AND not connected, we're still initializing
   const sp = facadeState.shielded.progress;
   const shieldedSynced = sp.isConnected
     ? (Number(sp.highestRelevantWalletIndex) === 0
@@ -186,7 +163,6 @@ function serializeState(
   try { if (facadeState.unshielded.address) unshieldedAddr = MidnightBech32m.encode(nid, facadeState.unshielded.address).toString(); } catch { /* */ }
   try { if (facadeState.dust.publicKey) dustAddr = DustAddress.encodePublicKey(nid, facadeState.dust.publicKey); } catch (e) { console.error('[GSD] Dust address encode failed:', e); }
 
-  // Serialize unshielded UTXOs for dust registration UI
   const utxos: SerializedUtxo[] = [];
   try {
     for (const uwm of facadeState.unshielded.availableCoins) {
@@ -250,7 +226,7 @@ function serializeState(
     connections: {
       node: up.isConnected,
       indexer: sp.isConnected,
-      prover: true, // TODO: track real prover connectivity
+      prover: true,
     },
     activeWalletName: activeWallet?.walletName ?? '',
   };
@@ -296,7 +272,9 @@ async function initializeWalletCore(
     ? { ...envConfig, ...customUrls }
     : envConfig;
 
-  const walletId = Array.from(seed.slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('');
+  // Derive a non-reversible wallet ID from the seed (never log raw seed bytes)
+  const seedHash = await crypto.subtle.digest('SHA-256', seed.buffer as ArrayBuffer);
+  const walletId = Array.from(new Uint8Array(seedHash).slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('');
 
   emit('debug', 'wallet', 'Deriving HD keys');
   const seedCopy = new Uint8Array(seed);
@@ -451,10 +429,7 @@ async function initializeWalletCore(
   let lastAppliedTotal = 0;
   let lastAdvanceTime = Date.now();
   let stallWarned = false;
-  let lastCheckpointTime = 0;
   let wasSynced = false;
-  // 11s avoids alignment with Chrome's 60s SW kill boundary
-  const CHECKPOINT_INTERVAL_MS = 11_000;
   const prevConnections = { shielded: false, unshielded: false, dust: false };
 
   const sub = facade.state().subscribe((facadeState) => {
@@ -467,7 +442,6 @@ async function initializeWalletCore(
       accountIndex,
     );
 
-    // Emit on status transitions
     if (serialized.status !== lastStatus) {
       emit('info', 'state', `Status: ${lastStatus || '(none)'} -> ${serialized.status}`, {
         shielded: serialized.shielded.progress,
@@ -478,7 +452,6 @@ async function initializeWalletCore(
       lastStatus = serialized.status;
     }
 
-    // Emit on sync phase transitions
     if (serialized.syncPhase !== lastPhase) {
       emit('info', 'sync', `Phase: ${lastPhase || '(none)'} -> ${serialized.syncPhase}`, {
         shielded: serialized.shielded.syncPercent,
@@ -488,7 +461,6 @@ async function initializeWalletCore(
       lastPhase = serialized.syncPhase;
     }
 
-    // Emit per-wallet connection changes
     const conns = {
       shielded: serialized.shielded.progress.connected,
       unshielded: serialized.unshielded.progress.connected,
@@ -501,7 +473,6 @@ async function initializeWalletCore(
       }
     }
 
-    // Throttled progress events (every 2s)
     const now = Date.now();
     if (now - lastProgressEmit >= 2000) {
       const currentAppliedTotal =
@@ -515,7 +486,6 @@ async function initializeWalletCore(
         stallWarned = false;
       }
 
-      // Detect stall: no progress for 30s while not synced
       const stallSeconds = Math.floor((now - lastAdvanceTime) / 1000);
       const isStalled = !serialized.isSynced && stallSeconds >= 30;
 
@@ -537,21 +507,13 @@ async function initializeWalletCore(
       lastProgressEmit = now;
     }
 
-    // Override syncPhase if stalled
     if (!serialized.isSynced && (Date.now() - lastAdvanceTime) >= 30_000) {
       serialized.syncPhase = 'stalled';
     }
 
-    // Periodic checkpoint to IndexedDB for SW restart resilience
-    const cpNow = Date.now();
-    const syncedTransition =
-      facadeState.isSynced && !wasSynced;
-    if (
-      cpNow - lastCheckpointTime >= CHECKPOINT_INTERVAL_MS ||
-      syncedTransition
-    ) {
-      lastCheckpointTime = cpNow;
-      wasSynced = facadeState.isSynced;
+    // Checkpoint only on sync completion (not periodically — offscreen is persistent)
+    if (facadeState.isSynced && !wasSynced) {
+      wasSynced = true;
       saveCheckpoint(
         facade,
         txHistoryStorage,
@@ -565,7 +527,7 @@ async function initializeWalletCore(
       });
     }
 
-    chrome.storage.session.set({ gsdLastState: serialized });
+    // State is broadcast to SW via stateListeners; SW caches in session storage
     for (const listener of stateListeners) {
       listener(serialized);
     }
@@ -590,7 +552,6 @@ async function initializeWalletCore(
         stallWarned = true;
       }
       latestSerialized.syncPhase = 'stalled';
-      chrome.storage.session.set({ gsdLastState: latestSerialized });
       for (const listener of stateListeners) {
         listener(latestSerialized);
       }
@@ -613,13 +574,8 @@ async function initializeWalletCore(
     stallCheckInterval,
   };
 
-  chrome.alarms.create('gsd-keepalive', { periodInMinutes: 0.5 });
-
-  // Keep SW alive during sync by creating an offscreen document that pings us
-  ensureOffscreenDocument();
   emit('info', 'wallet', 'WalletFacade ready, starting sync in background', { environment, networkId: effectiveConfig.networkId }, Date.now() - t0);
 
-  // Emit initial zero-progress state so popup renders immediately
   const initialState: SerializedWalletState = {
     status: 'initializing',
     environment,
@@ -633,7 +589,6 @@ async function initializeWalletCore(
     connections: { node: false, indexer: false, prover: false },
     activeWalletName: walletName,
   };
-  chrome.storage.session.set({ gsdLastState: initialState });
   for (const listener of stateListeners) {
     listener(initialState);
   }
@@ -659,7 +614,6 @@ export async function stopWallet(): Promise<void> {
     if (activeWallet.stallCheckInterval) {
       clearInterval(activeWallet.stallCheckInterval);
     }
-    // Save final checkpoint before stopping
     try {
       await saveCheckpoint(
         activeWallet.facade,
@@ -673,15 +627,12 @@ export async function stopWallet(): Promise<void> {
         error: String(e),
       });
     }
-    // Clear cached state so next init doesn't show stale balances
-    chrome.storage.session.remove('gsdLastState');
     try {
       await activeWallet.facade.stop();
     } catch (e) {
       emit('warn', 'wallet', 'Facade stop error (ignored)', { error: String(e) });
     }
     activeWallet = null;
-    chrome.alarms.clear('gsd-keepalive');
     emit('info', 'wallet', 'Wallet stopped');
   }
 }

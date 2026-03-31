@@ -4,6 +4,10 @@ import * as walletManager from './walletManager';
 import { getEnvironmentConfig } from '@shared/environments';
 import { emit } from './diagnosticLogger';
 
+// Yield to the event loop between heavy SDK operations so Chrome
+// doesn't flag the offscreen document as unresponsive.
+const yieldToEventLoop = () => new Promise<void>((r) => setTimeout(r, 0));
+
 type ApiResult = { result: unknown } | { error: { code: string; reason: string } };
 
 function err(code: string, reason: string): ApiResult {
@@ -204,21 +208,16 @@ async function handleApiCallInner(
         ledgerTypes.SignatureEnabled, ledgerTypes.Proof, ledgerTypes.PreBinding
       >;
 
-      // Extract segment IDs and contract addresses from intents
       try {
         const intents = tx.intents;
         const segmentIds = intents ? Array.from(intents.keys()) : [];
         const txInfo: Record<string, unknown> = { segmentIds, intentCount: segmentIds.length };
 
-        // Parse the full tx string for contract addresses
-        // Format: "Deploy ContractState (...)" or "Call <hex64>"
         const txStr = tx.toString();
-        // Match any standalone 64-char hex that appears near Deploy/Call keywords
         const allHex64 = [...txStr.matchAll(/(?:Deploy|Call|address)[^0-9a-f]*([0-9a-f]{64})/gi)];
         if (allHex64.length > 0) {
           txInfo['contractAddress'] = allHex64[0]![1];
         }
-        // Also try: the address field pattern from Rust debug format
         const addrMatch = txStr.match(/address:\s*"?([0-9a-f]{64})"?/i);
         if (addrMatch && !txInfo['contractAddress']) {
           txInfo['contractAddress'] = addrMatch[1];
@@ -228,6 +227,7 @@ async function handleApiCallInner(
       } catch { /* */ }
 
       emit('info', 'tx', 'balanceUnsealed: balancing');
+      await yieldToEventLoop();
       let t = Date.now();
       const recipe = await facade.balanceUnboundTransaction(
         tx, keys, { ttl: new Date(Date.now() + 30 * 60 * 1000) },
@@ -235,6 +235,7 @@ async function handleApiCallInner(
       emit('info', 'tx', 'balanceUnsealed: balanced', undefined, Date.now() - t);
 
       emit('info', 'tx', 'balanceUnsealed: signing');
+      await yieldToEventLoop();
       t = Date.now();
       const signed = keystore
         ? await facade.signRecipe(recipe, (payload) => keystore.signData(payload))
@@ -242,6 +243,7 @@ async function handleApiCallInner(
       emit('info', 'tx', 'balanceUnsealed: signed', undefined, Date.now() - t);
 
       emit('info', 'tx', 'balanceUnsealed: finalizing (proving)');
+      await yieldToEventLoop();
       t = Date.now();
       const finalized = await facade.finalizeRecipe(signed as typeof recipe);
       emit('info', 'tx', 'balanceUnsealed: finalized', undefined, Date.now() - t);
@@ -267,6 +269,7 @@ async function handleApiCallInner(
       ) as unknown as ledgerTypes.FinalizedTransaction;
 
       emit('info', 'tx', 'balanceSealed: balancing');
+      await yieldToEventLoop();
       let t = Date.now();
       const recipe = await facade.balanceFinalizedTransaction(
         tx, keys, { ttl: new Date(Date.now() + 30 * 60 * 1000) },
@@ -274,6 +277,7 @@ async function handleApiCallInner(
       emit('info', 'tx', 'balanceSealed: balanced', undefined, Date.now() - t);
 
       emit('info', 'tx', 'balanceSealed: finalizing (proving)');
+      await yieldToEventLoop();
       t = Date.now();
       const finalized = await facade.finalizeRecipe(recipe);
       emit('info', 'tx', 'balanceSealed: finalized', undefined, Date.now() - t);
@@ -323,6 +327,7 @@ async function handleApiCallInner(
       });
 
       emit('info', 'tx', 'makeTransfer: building recipe', { outputCount: desiredOutputs.length });
+      await yieldToEventLoop();
       let t = Date.now();
       const recipe = await facade.transferTransaction(transfers, keys, {
         ttl: new Date(Date.now() + 30 * 60 * 1000),
@@ -330,6 +335,7 @@ async function handleApiCallInner(
       emit('info', 'tx', 'makeTransfer: recipe built', undefined, Date.now() - t);
 
       emit('info', 'tx', 'makeTransfer: signing');
+      await yieldToEventLoop();
       t = Date.now();
       const signed = keystore
         ? await facade.signRecipe(recipe, (payload) => keystore.signData(payload))
@@ -337,6 +343,7 @@ async function handleApiCallInner(
       emit('info', 'tx', 'makeTransfer: signed', undefined, Date.now() - t);
 
       emit('info', 'tx', 'makeTransfer: finalizing (proving)');
+      await yieldToEventLoop();
       t = Date.now();
       const finalized = await facade.finalizeRecipe(signed as typeof recipe);
       emit('info', 'tx', 'makeTransfer: finalized', undefined, Date.now() - t);

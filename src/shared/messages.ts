@@ -112,3 +112,36 @@ export interface BridgeMessage {
   payload: DAppRequest | DAppResponse;
   requestId: string;
 }
+
+// --- Service Worker <-> Offscreen (SDK host) ---
+
+export type OffscreenEnvelope = OffscreenRequest | OffscreenResponse | OffscreenBroadcast;
+
+export interface OffscreenRequest {
+  id: string;
+  type: OffscreenRequestType;
+  payload: unknown;
+}
+
+export type OffscreenRequestType =
+  | 'INIT_WALLET'
+  | 'STOP_WALLET'
+  | 'GET_STATE'
+  | 'DAPP_API_CALL'
+  | 'SEND_TRANSFER'
+  | 'DUST_REGISTER'
+  | 'DUST_DEREGISTER'
+  | 'GET_TX_HISTORY'
+  | 'GET_DIAGNOSTIC_BACKLOG';
+
+export interface OffscreenResponse {
+  id: string;
+  type: 'RESPONSE' | 'ERROR';
+  payload: unknown;
+}
+
+export interface OffscreenBroadcast {
+  id: null;
+  type: 'STATE_UPDATE' | 'DIAGNOSTIC_EVENT' | 'HEARTBEAT' | 'READY';
+  payload: unknown;
+}
