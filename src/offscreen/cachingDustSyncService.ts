@@ -6,7 +6,7 @@ import {
   WsSubscriptionClient,
 } from '@midnight-ntwrk/wallet-sdk-indexer-client/effect';
 import { WsURL } from '@midnight-ntwrk/wallet-sdk-utilities/networking';
-import { SyncService as DustSyncService, type CoreWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
+import { SyncService as DustSyncService, CoreWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
 // SyncWalletError is structurally identical across both wallet SDKs (_tag: 'Wallet.Sync').
 // The dust v1 subpath doesn't re-export WalletError, so we borrow the shielded version.
 import { WalletError as ShieldedWalletError } from '@midnight-ntwrk/wallet-sdk-shielded/v1';
@@ -70,6 +70,7 @@ function makeCachedStream(
     Stream.groupedWithin(batchSize, Duration.millis(1)),
     Stream.map(Chunk.toArray),
     Stream.map((data) => WalletSyncUpdate.create(data, secretKey, new Date())),
+    Stream.schedule(Schedule.spaced(Duration.millis(1))),
   );
 }
 
@@ -165,6 +166,8 @@ function makeLiveStream(
  */
 export function makeCachingDustSyncService(
   network: string,
+  skipCache = false,
+  preScanned = false,
 ): (config: DefaultSyncConfiguration) => DustSyncService.SyncService<CoreWallet, DustSecretKey, WalletSyncUpdate> {
   return (config) => {
     const defaultService = makeDefaultSyncService(config);
@@ -173,7 +176,15 @@ export function makeCachingDustSyncService(
       updates: (state, secretKey) => {
         const appliedIndex = Number(state.progress.appliedIndex ?? 0n);
 
-        const cachedStream = makeCachedStream(network, appliedIndex, secretKey);
+        if (skipCache) {
+          return makeLiveStream(network, appliedIndex, config, secretKey) as ReturnType<
+            DustSyncService.SyncService<CoreWallet, DustSecretKey, WalletSyncUpdate>['updates']
+          >;
+        }
+
+        const cachedStream = preScanned
+          ? makePreScannedDustStream(network, appliedIndex, secretKey)
+          : makeCachedStream(network, appliedIndex, secretKey);
 
         const liveStream = pipe(
           Stream.fromEffect(Effect.promise(() => getMaxEventId(network, 'dust'))),
@@ -184,6 +195,111 @@ export function makeCachingDustSyncService(
         );
 
         return Stream.concat(cachedStream, liveStream) as ReturnType<
+          DustSyncService.SyncService<CoreWallet, DustSecretKey, WalletSyncUpdate>['updates']
+        >;
+      },
+
+      blockData: () => defaultService.blockData(),
+    };
+  };
+}
+
+/**
+ * Sync capability that advances progress without calling `applyEvents`.
+ *
+ * Used after scan workers confirmed zero matches.
+ */
+export function makeSkipReplayDustSyncCapability(): DustSyncService.SyncCapability<CoreWallet, WalletSyncUpdate> {
+  return {
+    applyUpdate: (state, wrappedUpdate) => {
+      const { updates } = wrappedUpdate;
+      if (updates.length === 0) return state;
+      const lastUpdate = updates[updates.length - 1]!;
+      return CoreWallet.updateProgress(state, {
+        highestRelevantWalletIndex: BigInt(lastUpdate.maxId),
+        appliedIndex: BigInt(lastUpdate.id),
+        isConnected: true,
+      });
+    },
+  };
+}
+
+/**
+ * Fast stream that reads cached dust event IDs without deserializing.
+ */
+function makePreScannedDustStream(
+  network: string,
+  fromId: number,
+  secretKey: DustSecretKey,
+): Stream.Stream<WalletSyncUpdate, SyncWalletError> {
+  return pipe(
+    Stream.fromEffect(
+      Effect.promise(async () => {
+        const events = await getNetworkEvents(network, 'dust', fromId);
+        if (events.length > 0) {
+          const maxId = events[events.length - 1]?.id ?? fromId;
+          emit('info', 'sync', `Fast-forwarding dust: ${events.length} pre-scanned events (${fromId}→${maxId})`, {
+            network,
+            count: events.length,
+          });
+        }
+        return events;
+      }),
+    ),
+    Stream.flatMap((events) => Stream.fromIterable(events)),
+    Stream.map((cached) => ({
+      id: cached.id,
+      raw: null as unknown as import('@midnight-ntwrk/ledger-v8').Event,
+      maxId: cached.maxId,
+    })),
+    Stream.groupedWithin(100, Duration.millis(1)),
+    Stream.map(Chunk.toArray),
+    Stream.map((data) => WalletSyncUpdate.create(data, secretKey, new Date())),
+  ) as Stream.Stream<WalletSyncUpdate, SyncWalletError>;
+}
+
+/**
+ * Creates a cache-only dust sync service for use in replay workers.
+ *
+ * Returns only the cached event stream — no live WebSocket subscription.
+ * No `Schedule.spaced` yield since the worker has exclusive CPU access.
+ * The stream ends after all cached events have been emitted.
+ */
+export function makeCacheOnlyDustSyncService(
+  network: string,
+): (config: DefaultSyncConfiguration) => DustSyncService.SyncService<CoreWallet, DustSecretKey, WalletSyncUpdate> {
+  return (config) => {
+    const defaultService = makeDefaultSyncService(config);
+
+    return {
+      updates: (state, secretKey) => {
+        const appliedIndex = Number(state.progress.appliedIndex ?? 0n);
+        const batchSize = 10;
+        return pipe(
+          Stream.fromEffect(
+            Effect.promise(async () => {
+              const events = await getNetworkEvents(network, 'dust', appliedIndex);
+              if (events.length > 0) {
+                const maxId = events[events.length - 1]?.id ?? appliedIndex;
+                emit('info', 'sync', `Worker: replaying ${events.length} dust events (${appliedIndex}→${maxId})`, {
+                  network,
+                  count: events.length,
+                });
+              }
+              return events;
+            }),
+          ),
+          Stream.flatMap((events) => Stream.fromIterable(events)),
+          Stream.mapEffect((cached) =>
+            Effect.try({
+              try: () => decodeEventPayload(cached.id, cached.raw, cached.maxId),
+              catch: (err) => new SyncWalletError({ message: String(err), cause: err }),
+            }),
+          ),
+          Stream.groupedWithin(batchSize, Duration.millis(1)),
+          Stream.map(Chunk.toArray),
+          Stream.map((data) => WalletSyncUpdate.create(data, secretKey, new Date())),
+        ) as ReturnType<
           DustSyncService.SyncService<CoreWallet, DustSecretKey, WalletSyncUpdate>['updates']
         >;
       },

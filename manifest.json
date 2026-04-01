@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Midnight GSD Wallet",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Midnight GSD Wallet — Get Stuff Debugged",
   "permissions": ["storage", "offscreen", "alarms", "activeTab"],
   "host_permissions": ["<all_urls>"],
@@ -34,6 +34,10 @@
   "web_accessible_resources": [
     {
       "resources": ["src/content-script/inpage.js"],
+      "matches": ["<all_urls>"]
+    },
+    {
+      "resources": ["data/*"],
       "matches": ["<all_urls>"]
     }
   ],

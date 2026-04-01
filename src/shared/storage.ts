@@ -215,6 +215,23 @@ export async function getNetworkEvents(
     .sort((a, b) => a.id - b.id);
 }
 
+export async function getNetworkEventsInRange(
+  network: string,
+  type: NetworkEventType,
+  fromId: number,
+  toId: number,
+): Promise<CachedNetworkEvent[]> {
+  const db = await getDb();
+  const all = await db.getAllFromIndex(
+    'networkEvents',
+    'byNetworkAndType',
+    [network, type],
+  );
+  return (all as CachedNetworkEvent[])
+    .filter((e) => e.id > fromId && e.id <= toId)
+    .sort((a, b) => a.id - b.id);
+}
+
 export async function putNetworkEvents(
   network: string,
   type: NetworkEventType,

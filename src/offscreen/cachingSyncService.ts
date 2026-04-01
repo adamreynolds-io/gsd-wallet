@@ -6,7 +6,7 @@ import {
   WsSubscriptionClient,
 } from '@midnight-ntwrk/wallet-sdk-indexer-client/effect';
 import { WsURL } from '@midnight-ntwrk/wallet-sdk-utilities/networking';
-import { Sync, WalletError, type CoreWallet } from '@midnight-ntwrk/wallet-sdk-shielded/v1';
+import { Sync, WalletError, CoreWallet } from '@midnight-ntwrk/wallet-sdk-shielded/v1';
 import { getNetworkEvents, getMaxEventId, putNetworkEvents } from '@shared/storage';
 import { emit } from './diagnosticLogger';
 
@@ -67,6 +67,7 @@ function makeCachedStream(
     Stream.groupedWithin(batchSize, Duration.millis(1)),
     Stream.map(Chunk.toArray),
     Stream.map((data) => WalletSyncUpdate.create(data, secretKeys)),
+    Stream.schedule(Schedule.spaced(Duration.millis(1))),
   );
 }
 
@@ -163,13 +164,21 @@ function makeLiveStream(
  */
 export function makeCachingShieldedSyncService(
   network: string,
+  skipCache = false,
+  preScanned = false,
 ): (config: DefaultSyncConfiguration) => Sync.SyncService<CoreWallet, ledger.ZswapSecretKeys, WalletSyncUpdate> {
   return (config) => ({
     updates: (state, secretKeys) => {
       const appliedIndex = Number(state.progress?.appliedIndex ?? 0n);
       const batchSize = config.batchSize ?? 10;
 
-      const cachedStream = makeCachedStream(network, appliedIndex, batchSize, secretKeys);
+      if (skipCache) {
+        return makeLiveStream(network, appliedIndex, config, secretKeys);
+      }
+
+      const cachedStream = preScanned
+        ? makePreScannedStream(network, appliedIndex, secretKeys)
+        : makeCachedStream(network, appliedIndex, batchSize, secretKeys);
 
       const liveStream = pipe(
         Stream.fromEffect(Effect.promise(() => getMaxEventId(network, 'zswap'))),
@@ -180,6 +189,106 @@ export function makeCachingShieldedSyncService(
       );
 
       return Stream.concat(cachedStream, liveStream);
+    },
+  });
+}
+
+/**
+ * Sync capability that advances progress without calling `replayEvents`.
+ *
+ * Used after scan workers confirmed zero matches — events don't need
+ * deserialization or application, just progress counter advancement.
+ */
+export function makeSkipReplayShieldedSyncCapability(): Sync.SyncCapability<CoreWallet, WalletSyncUpdate> {
+  return {
+    applyUpdate: (state, wrappedUpdate) => {
+      if (wrappedUpdate.updates.length === 0) return state;
+      const lastUpdate = wrappedUpdate.updates[wrappedUpdate.updates.length - 1]!;
+      return CoreWallet.updateProgress(state, {
+        highestRelevantWalletIndex: BigInt(lastUpdate.maxId),
+        appliedIndex: BigInt(lastUpdate.id),
+        isConnected: true,
+      });
+    },
+  };
+}
+
+/**
+ * Builds a fast stream that reads cached event IDs without deserializing.
+ *
+ * Creates placeholder `EventsSyncUpdate` entries with only `id`/`maxId` set.
+ * The `event` field is a dummy — the skip-replay capability never accesses it.
+ */
+function makePreScannedStream(
+  network: string,
+  fromId: number,
+  secretKeys: ledger.ZswapSecretKeys,
+): Stream.Stream<WalletSyncUpdate, SyncWalletError> {
+  return pipe(
+    Stream.fromEffect(
+      Effect.promise(async () => {
+        const events = await getNetworkEvents(network, 'zswap', fromId);
+        if (events.length > 0) {
+          const maxId = events[events.length - 1]?.id ?? fromId;
+          emit('info', 'sync', `Fast-forwarding shielded: ${events.length} pre-scanned events (${fromId}→${maxId})`, {
+            network,
+            count: events.length,
+          });
+        }
+        return events;
+      }),
+    ),
+    Stream.flatMap((events) => Stream.fromIterable(events)),
+    Stream.map((cached) => ({
+      _tag: 'EventsSyncUpdate' as const,
+      id: cached.id,
+      maxId: cached.maxId,
+      event: null as unknown as ledger.Event,
+    })),
+    Stream.groupedWithin(100, Duration.millis(1)),
+    Stream.map(Chunk.toArray),
+    Stream.map((data) => WalletSyncUpdate.create(data, secretKeys)),
+  );
+}
+
+/**
+ * Creates a cache-only shielded sync service for use in replay workers.
+ *
+ * Returns only the cached event stream — no live WebSocket subscription.
+ * No `Schedule.spaced` yield since the worker has exclusive CPU access.
+ * The stream ends after all cached events have been emitted.
+ */
+export function makeCacheOnlyShieldedSyncService(
+  network: string,
+): (config: DefaultSyncConfiguration) => Sync.SyncService<CoreWallet, ledger.ZswapSecretKeys, WalletSyncUpdate> {
+  return () => ({
+    updates: (state, secretKeys) => {
+      const appliedIndex = Number(state.progress?.appliedIndex ?? 0n);
+      return pipe(
+        Stream.fromEffect(
+          Effect.promise(async () => {
+            const events = await getNetworkEvents(network, 'zswap', appliedIndex);
+            if (events.length > 0) {
+              const maxId = events[events.length - 1]?.id ?? appliedIndex;
+              emit('info', 'sync', `Worker: replaying ${events.length} shielded events (${appliedIndex}→${maxId})`, {
+                network,
+                count: events.length,
+              });
+            }
+            return events;
+          }),
+        ),
+        Stream.flatMap((events) => Stream.fromIterable(events)),
+        Stream.mapEffect((cached) =>
+          Effect.try({
+            try: () => decodeEventPayload(cached.id, cached.raw, cached.maxId),
+            catch: (err) => new SyncWalletError({ message: String(err), cause: err }),
+          }),
+        ),
+        Stream.groupedWithin(10, Duration.millis(1)),
+        Stream.map(Chunk.toArray),
+        Stream.map((data) => WalletSyncUpdate.create(data, secretKeys)),
+      );
     },
   });
 }

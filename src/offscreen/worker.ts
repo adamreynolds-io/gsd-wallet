@@ -119,6 +119,15 @@ async function handleRequest(msg: { id: string; type: string; payload: unknown }
         break;
       }
 
+      case 'EXPORT_CACHE': {
+        const { exportCacheAsNdjson } = await import('./cacheImporter');
+        const env = walletManager.getEnvironment();
+        if (!env) { sendError(id, 'No active wallet'); break; }
+        const ndjson = await exportCacheAsNdjson(env);
+        sendResponse(id, ndjson);
+        break;
+      }
+
       default:
         sendError(id, `Unknown request type: ${type}`);
     }

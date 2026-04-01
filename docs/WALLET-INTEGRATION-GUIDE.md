@@ -342,9 +342,11 @@ The indexer streams all shielded (ZswapEvents) and dust (DustLedgerEvents) event
 
 **Implementation:** The caching layer replaces the SDK's default sync services via `V1Builder.withSync()`. `CustomShieldedWallet` (SDK export) and `CustomDustWallet` (local wrapper — the SDK doesn't export one) accept custom builders. The sync capability (`applyUpdate`) is reused unchanged from the SDK — only the event source is replaced.
 
-**Performance:** On mainnet with ~88k events per type, cache replay takes ~2 minutes (CPU-bound `ledger.Event.deserialize()`). The network download is eliminated entirely. The main benefit is for slow/unreliable connections and for avoiding redundant indexer load across multiple wallets.
+**Bundled cache snapshot:** On fresh install, a bundled NDJSON snapshot (`public/data/{network}-cache.ndjson`) is imported into the `networkEvents` IndexedDB store before sync starts, taking ~5s. This eliminates the network download entirely for cached events. If the bundled file is not found, the importer falls back to a remote URL (configurable in `REMOTE_CACHE_URLS`). The cache can be exported via the `EXPORT_CACHE` worker message to produce an NDJSON file for sharing across installations or archiving.
 
-**Reference:** `gsd-wallet/src/offscreen/cachingSyncService.ts`, `gsd-wallet/src/offscreen/cachingDustSyncService.ts`, `gsd-wallet/src/offscreen/customDustWallet.ts`, `gsd-wallet/src/shared/storage.ts:networkEvents`
+**Performance:** On mainnet with ~89k events per type, cache import takes ~5s and cache replay ~3 min (CPU-bound `ledger.Event.deserialize()`), followed by a ~2s live delta sync — total ~3 min 17s from fresh install (vs 6+ min from indexer). The network download is eliminated entirely. The main benefit is for slow/unreliable connections and for avoiding redundant indexer load across multiple wallets.
+
+**Reference:** `gsd-wallet/src/offscreen/cachingSyncService.ts`, `gsd-wallet/src/offscreen/cachingDustSyncService.ts`, `gsd-wallet/src/offscreen/customDustWallet.ts`, `gsd-wallet/src/offscreen/cacheImporter.ts`, `gsd-wallet/src/shared/storage.ts:networkEvents`
 
 #### Popup height limit
 
@@ -819,7 +821,7 @@ The indexer streams **all** ZSwap (shielded) and dust events on the chain, not j
 
 Unshielded transactions are public and can be filtered server-side, so they sync instantly.
 
-On mainnet with ~88k shielded and ~88k dust events, first sync takes several minutes. Subsequent opens restore from per-wallet checkpoints and only sync the delta. Additionally, the shared network event cache (see section 4) allows wallets on the same network to replay cached events from IndexedDB instead of re-downloading from the indexer — eliminating network I/O for all wallets after the first.
+On mainnet with ~89k shielded and ~89k dust events, first sync takes ~3 min from the bundled cache snapshot (vs 6+ min downloading from the indexer). Subsequent opens restore from per-wallet checkpoints and only sync the delta (~2s). The shared network event cache (see section 4) allows wallets on the same network to replay cached events from IndexedDB instead of re-downloading from the indexer — eliminating network I/O for all wallets after the first.
 
 ---
 
@@ -903,6 +905,8 @@ The GSD Wallet runs the facade in an offscreen document with the service worker 
 | Caching shielded sync service | `src/offscreen/cachingSyncService.ts` | `makeCachingShieldedSyncService()` |
 | Caching dust sync service | `src/offscreen/cachingDustSyncService.ts` | `makeCachingDustSyncService()` |
 | Custom dust wallet factory | `src/offscreen/customDustWallet.ts` | `CustomDustWallet()` — mirrors SDK's `DustWallet()` with custom builder |
+| Bundled/remote cache import + NDJSON export | `src/offscreen/cacheImporter.ts` | `importBundledCache()`, `exportCacheAsNdjson()` |
+| Parallel scan infrastructure (disabled) | `src/offscreen/scanWorker.ts` | `CoreWallet.replayEvents` direct scan — bypasses SDK sync runtime; disabled pending Merkle tree sequential constraint resolution |
 
 **Shared:**
 

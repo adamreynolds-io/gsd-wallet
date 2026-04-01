@@ -426,6 +426,12 @@ async function handlePopupMessage(
         break;
       }
 
+      case 'EXPORT_CACHE': {
+        const ndjson = await offscreenClient.request('EXPORT_CACHE', null) as string;
+        send({ type: 'EXPORT_CACHE_RESULT', data: ndjson });
+        break;
+      }
+
       case 'CLEAR_ALL': {
         await offscreenClient.request('STOP_WALLET', null);
         await stateManager.clearAll();

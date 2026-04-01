@@ -62,7 +62,8 @@ export type PopupRequest =
   | { type: 'CHECK_HAS_WALLETS' }
   | { type: 'GET_TX_HISTORY' }
   | { type: 'GET_DIAGNOSTIC_BACKLOG' }
-  | { type: 'CLEAR_ALL' };
+  | { type: 'CLEAR_ALL' }
+  | { type: 'EXPORT_CACHE' };
 
 export type PopupResponse =
   | { type: 'STATE_UPDATE'; state: SerializedWalletState }
@@ -84,7 +85,8 @@ export type PopupResponse =
   | { type: 'DIAGNOSTIC_EVENT'; event: DiagnosticEvent }
   | { type: 'DIAGNOSTIC_EVENTS_BATCH'; events: DiagnosticEvent[] }
   | { type: 'UPDATE_AVAILABLE'; currentVersion: string; latestVersion: string; releaseUrl: string; downloadUrl: string }
-  | { type: 'ERROR'; error: string };
+  | { type: 'ERROR'; error: string }
+  | { type: 'EXPORT_CACHE_RESULT'; data: string };
 
 export interface TransferRequest {
   tokenType: 'shielded' | 'unshielded';
@@ -132,7 +134,8 @@ export type OffscreenRequestType =
   | 'DUST_REGISTER'
   | 'DUST_DEREGISTER'
   | 'GET_TX_HISTORY'
-  | 'GET_DIAGNOSTIC_BACKLOG';
+  | 'GET_DIAGNOSTIC_BACKLOG'
+  | 'EXPORT_CACHE';
 
 export interface OffscreenResponse {
   id: string;

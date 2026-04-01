@@ -56,6 +56,9 @@ Load `dist/` as above.
 - **Log export** — download all diagnostic events as NDJSON with ISO timestamps
 - **Debug tabs** — real-time sync progress, UTXO inspection, token balances per subsystem, transaction history
 - **Built-in explorer** — query the v4 indexer for transaction, block, and contract details
+- **Shared event cache** — network events cached in IndexedDB, shared across wallets on the same network
+- **Bundled mainnet snapshot** — 88k pre-built events for zero-download first sync
+- **Cache export** — download event cache as NDJSON for sharing or backup
 
 ## Architecture
 
@@ -77,6 +80,8 @@ The offscreen document initiates the port connection to the SW. When Chrome rest
 
 SDK wallet state is checkpointed to IndexedDB on sync completion and wallet stop. On browser restart, the wallet restores from checkpoint and resumes syncing from the last saved position.
 
+Network events (shielded ZSwap and dust events) are cached in IndexedDB per-network and shared across all wallets on the same network. A bundled mainnet cache snapshot (88k events) ships with the extension — imported into IndexedDB in ~5s on first install, eliminating the network download for cached events.
+
 The offscreen document is persistent — Chrome does not garbage-collect it. No keepalive hacks are needed.
 
 ## How sync works
@@ -89,7 +94,7 @@ The wallet syncs three subsystems independently:
 | **Unshielded** | Only your transactions | Public — indexer can filter by address without privacy risk |
 | **Dust** | All dust events on chain | Same privacy model as shielded — local filtering |
 
-**First sync is slow on mainnet** (~87k shielded + ~87k dust events). The unshielded subsystem syncs instantly.
+**First sync is slow on mainnet** (~89k shielded + ~89k dust events), but a bundled cache snapshot ships with the extension — fresh install syncs from local cache in ~3 min instead of 6+ min from the indexer. The unshielded subsystem syncs instantly.
 
 Two-phase initialization ensures the UI is never blocked:
 1. **Phase 1 (fast):** Load checkpoint, create facade, subscribe to state, emit initial state to UI
@@ -156,7 +161,7 @@ Seed material is zeroed after use in the Worker. Wallet IDs are derived from SHA
 
 - **Contract call transactions fail in Chrome** — `balanceUnsealedTransaction` fails with `IntentSegmentIdCollision` for contract call transactions in the Chrome extension context. The same code path succeeds in Node.js. Deploy transactions work fine. This is an upstream SDK/ledger issue — no workaround exists for dApp developers. See [#45](https://github.com/adamreynolds-io/gsd-wallet/issues/45).
 - **Mainnet RPC disconnects** — The mainnet RPC node periodically drops WebSocket connections with `1000: Normal Closure`. The SDK reconnects automatically but sync can stall temporarily.
-- **First mainnet sync takes minutes** — ~87k shielded + ~87k dust events must be processed client-side for privacy.
+- **First mainnet sync takes ~3 min** — ~89k shielded + ~89k dust events are replayed from the bundled cache snapshot (was 6+ min from indexer). Subsequent opens resume from per-wallet checkpoints.
 
 ## Documentation
 

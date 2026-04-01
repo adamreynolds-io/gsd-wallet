@@ -11,8 +11,9 @@ import { HDWallet, Roles, type Role } from '@midnight-ntwrk/wallet-sdk-hd';
 import { CustomShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
 import { V1Builder as ShieldedV1Builder, Sync as ShieldedSync } from '@midnight-ntwrk/wallet-sdk-shielded/v1';
 import { V1Builder as DustV1Builder, SyncService as DustSyncService } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
-import { makeCachingShieldedSyncService } from './cachingSyncService';
-import { makeCachingDustSyncService } from './cachingDustSyncService';
+import { makeCachingShieldedSyncService, makeSkipReplayShieldedSyncCapability } from './cachingSyncService';
+import { makeCachingDustSyncService, makeSkipReplayDustSyncCapability } from './cachingDustSyncService';
+import { getMaxEventId } from '@shared/storage';
 import { CustomDustWallet } from './customDustWallet';
 import { makeServerProvingService } from '@midnight-ntwrk/wallet-sdk-capabilities';
 import type { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
@@ -29,6 +30,7 @@ import {
   loadCheckpoint,
   clearCheckpoint,
 } from './sdkCheckpoint';
+import { importBundledCache } from './cacheImporter';
 
 export interface WalletSecretKeys {
   shieldedSecretKeys: ledger.ZswapSecretKeys;
@@ -256,12 +258,12 @@ export function initializeWallet(
   return initializingPromise;
 }
 
-function makeShieldedBuilder(network: string) {
+function makeShieldedBuilder(network: string, skipCache = false, preScanned = false) {
   return new ShieldedV1Builder()
     .withDefaultTransactionType()
     .withSync(
-      makeCachingShieldedSyncService(network),
-      ShieldedSync.makeEventsSyncCapability,
+      makeCachingShieldedSyncService(network, skipCache, preScanned),
+      preScanned ? makeSkipReplayShieldedSyncCapability : ShieldedSync.makeEventsSyncCapability,
     )
     .withSerializationDefaults()
     .withTransactingDefaults()
@@ -271,18 +273,154 @@ function makeShieldedBuilder(network: string) {
     .withKeysDefaults();
 }
 
-function makeDustBuilder(network: string) {
+function makeDustBuilder(network: string, skipCache = false, preScanned = false) {
   return new DustV1Builder()
     .withDefaultTransactionType()
     .withSync(
-      makeCachingDustSyncService(network),
-      DustSyncService.makeDefaultSyncCapability,
+      makeCachingDustSyncService(network, skipCache, preScanned),
+      preScanned ? makeSkipReplayDustSyncCapability : DustSyncService.makeDefaultSyncCapability,
     )
     .withSerializationDefaults()
     .withTransactingDefaults()
     .withCoinSelectionDefaults()
     .withCoinsAndBalancesDefaults()
     .withKeysDefaults();
+}
+
+const SCAN_TIMEOUT_MS = 180_000;
+
+interface ScanResult {
+  matched: boolean;
+  lastEventId: number;
+  maxId: number;
+}
+
+/**
+ * Spawns two scan workers (one shielded, one dust) to check all cached
+ * events for wallet matches in parallel on separate CPU cores.
+ *
+ * Each worker uses `CoreWallet.replayEvents` directly (no SDK sync
+ * runtime) and processes the full event range from 0. The Merkle
+ * commitment tree requires sequential insertion so chunking is not
+ * possible.
+ *
+ * If both workers report "no matches", the wallet can skip WASM
+ * deserialization entirely and fast-forward through cached events.
+ *
+ * Returns null if cache is empty or any worker fails.
+ */
+async function scanCacheForMatches(
+  network: string,
+  networkId: string,
+  derivedKeys: Record<number, Uint8Array>,
+): Promise<{ shielded: ScanResult; dust: ScanResult } | null> {
+  const [shieldedMax, dustMax] = await Promise.all([
+    getMaxEventId(network, 'zswap'),
+    getMaxEventId(network, 'dust'),
+  ]);
+
+  if (shieldedMax === 0 && dustMax === 0) return null;
+
+  emit('info', 'sync', 'Starting parallel cache scan', {
+    network,
+    shieldedMax,
+    dustMax,
+    workers: 2,
+  });
+
+  const t0 = Date.now();
+
+  function spawnScanWorker(
+    type: 'zswap' | 'dust',
+    seed: Uint8Array,
+    fromId: number,
+    toId: number,
+  ): Promise<{ matched: boolean; lastEventId: number; maxId: number; coinCount: number }> {
+    return new Promise((resolve, reject) => {
+      // Vite requires `new Worker(new URL(..., import.meta.url))` inline
+      const worker = new Worker(
+        new URL('./scanWorker.ts', import.meta.url),
+        { type: 'module' },
+      );
+
+      const timer = setTimeout(() => {
+        worker.terminate();
+        reject(new Error(`Scan worker ${type} [${fromId}→${toId}] timed out`));
+      }, SCAN_TIMEOUT_MS);
+
+      worker.onmessage = (event: MessageEvent) => {
+        clearTimeout(timer);
+        const msg = event.data as {
+          type: string;
+          matched?: boolean;
+          lastEventId?: number;
+          maxId?: number;
+          coinCount?: number;
+          error?: string;
+        };
+        if (msg.type === 'DONE') {
+          resolve({
+            matched: msg.matched ?? false,
+            lastEventId: msg.lastEventId ?? toId,
+            maxId: msg.maxId ?? toId,
+            coinCount: msg.coinCount ?? 0,
+          });
+        } else {
+          reject(new Error(`Scan worker ${type} [${fromId}→${toId}] failed: ${msg.error ?? 'unknown'}`));
+        }
+        worker.terminate();
+      };
+
+      worker.onerror = (err) => {
+        clearTimeout(timer);
+        reject(new Error(`Scan worker error: ${err.message}`));
+        worker.terminate();
+      };
+
+      worker.postMessage({
+        type,
+        network,
+        networkId,
+        seed: Array.from(seed),
+        fromId,
+        toId,
+      });
+    });
+  }
+
+  try {
+    const [shieldedResult, dustResult] = await Promise.all([
+      spawnScanWorker('zswap', derivedKeys[Roles.Zswap]!, 0, shieldedMax),
+      spawnScanWorker('dust', derivedKeys[Roles.Dust]!, 0, dustMax),
+    ]);
+
+    emit('info', 'sync', 'Parallel scan complete', {
+      elapsed: Date.now() - t0,
+      shieldedMatched: shieldedResult.matched,
+      dustMatched: dustResult.matched,
+      shieldedCoins: shieldedResult.coinCount,
+      dustCoins: dustResult.coinCount,
+    });
+
+    return {
+      shielded: {
+        matched: shieldedResult.matched,
+        lastEventId: shieldedResult.lastEventId,
+        maxId: shieldedResult.maxId,
+      },
+      dust: {
+        matched: dustResult.matched,
+        lastEventId: dustResult.lastEventId,
+        maxId: dustResult.maxId,
+      },
+    };
+  } catch (err) {
+    emit('warn', 'sync', 'Parallel scan failed, falling back to sequential', {
+      error: String(err),
+      elapsed: Date.now() - t0,
+    });
+    return null;
+  }
 }
 
 async function initializeWalletCore(
@@ -429,6 +567,15 @@ async function initializeWalletCore(
       });
     }
   } else {
+    // Import bundled cache if IndexedDB is empty for this network
+    const [shieldedCached, dustCached] = await Promise.all([
+      getMaxEventId(environment, 'zswap'),
+      getMaxEventId(environment, 'dust'),
+    ]);
+    if (shieldedCached === 0 && dustCached === 0) {
+      await importBundledCache(environment);
+    }
+
     facade = await WalletFacade.init({
       configuration: config,
       shielded: (cfg) =>
