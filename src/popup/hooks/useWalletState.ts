@@ -93,15 +93,16 @@ export function useWalletConnection(): void {
     chrome.storage.session.get(['gsdEnvironment', 'gsdLastState', 'gsdDiagnosticEvents']).then((result) => {
       const store = usePopupStore.getState();
       if (result['gsdLastState'] && !store.walletState) {
-        store.setWalletState(result['gsdLastState']);
+        store.setWalletState(result['gsdLastState'] as SerializedWalletState);
         if (store.hasVault === null) {
           store.setHasVault(true);
         }
       } else if (result['gsdEnvironment']) {
-        store.setEnvironment(result['gsdEnvironment']);
+        store.setEnvironment(result['gsdEnvironment'] as import('@shared/types').Environment);
       }
-      if (result['gsdDiagnosticEvents']?.length) {
-        store.addDiagnosticEventsBatch(result['gsdDiagnosticEvents']);
+      const cachedEvents = result['gsdDiagnosticEvents'] as import('@shared/types').DiagnosticEvent[] | undefined;
+      if (cachedEvents?.length) {
+        store.addDiagnosticEventsBatch(cachedEvents);
       }
     });
 
@@ -118,7 +119,7 @@ export function useWalletConnection(): void {
       }
       if (changes['gsdDiagnosticEvents']?.newValue) {
         const store = usePopupStore.getState();
-        store.addDiagnosticEventsBatch(changes['gsdDiagnosticEvents'].newValue);
+        store.addDiagnosticEventsBatch(changes['gsdDiagnosticEvents'].newValue as import('@shared/types').DiagnosticEvent[]);
       }
     };
     chrome.storage.onChanged.addListener(storageListener);

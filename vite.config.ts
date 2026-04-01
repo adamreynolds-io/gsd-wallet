@@ -2,7 +2,6 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { crx } from '@crxjs/vite-plugin';
 import wasm from 'vite-plugin-wasm';
-import topLevelAwait from 'vite-plugin-top-level-await';
 import { resolve } from 'path';
 import { readFileSync } from 'fs';
 import manifest from './manifest.json';
@@ -15,7 +14,7 @@ const facadePkg = JSON.parse(
 ) as { version: string };
 
 export default defineConfig({
-  plugins: [wasm(), topLevelAwait(), react(), crx({ manifest })],
+  plugins: [wasm(), react(), crx({ manifest })],
   resolve: {
     alias: {
       '@shared': resolve(__dirname, 'src/shared'),
