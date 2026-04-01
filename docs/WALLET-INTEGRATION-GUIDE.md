@@ -150,11 +150,43 @@ const unshieldedKeystore = createKeystore(derivedKeys[Roles.NightExternal], netw
 
 ```typescript
 import { WalletFacade } from '@midnight-ntwrk/wallet-sdk-facade';
-import { ShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
+import { CustomShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
+import { V1Builder as ShieldedV1Builder, Sync as ShieldedSync } from '@midnight-ntwrk/wallet-sdk-shielded/v1';
 import { UnshieldedWallet } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
-import { DustWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
 import { makeServerProvingService } from '@midnight-ntwrk/wallet-sdk-capabilities';
+import { CustomDustWallet } from './customDustWallet'; // local wrapper (see section 4)
+import { V1Builder as DustV1Builder, SyncService as DustSyncService } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
+import { makeCachingShieldedSyncService } from './cachingSyncService';
+import { makeCachingDustSyncService } from './cachingDustSyncService';
+```
 
+Add the builder helpers before the facade init:
+```typescript
+// Caching sync builders — events are written to IndexedDB as they arrive,
+// so other wallets on the same network can replay from cache instead of
+// re-downloading from the indexer.
+const shieldedBuilder = new ShieldedV1Builder()
+  .withDefaultTransactionType()
+  .withSync(makeCachingShieldedSyncService(environment), ShieldedSync.makeEventsSyncCapability)
+  .withSerializationDefaults()
+  .withTransactingDefaults()
+  .withCoinSelectionDefaults()
+  .withCoinsAndBalancesDefaults()
+  .withTransactionHistoryDefaults()
+  .withKeysDefaults();
+
+const dustBuilder = new DustV1Builder()
+  .withDefaultTransactionType()
+  .withSync(makeCachingDustSyncService(environment), DustSyncService.makeDefaultSyncCapability)
+  .withSerializationDefaults()
+  .withTransactingDefaults()
+  .withCoinSelectionDefaults()
+  .withCoinsAndBalancesDefaults()
+  .withKeysDefaults();
+```
+
+Then in the facade init, change the wallet factories:
+```typescript
 const facade = await WalletFacade.init({
   configuration: {
     networkId,
@@ -164,9 +196,9 @@ const facade = await WalletFacade.init({
     costParameters: { feeBlocksMargin: 5 },
     txHistoryStorage: new InMemoryTransactionHistoryStorage(),
   },
-  shielded: (cfg) => ShieldedWallet(cfg).startWithSeed(derivedKeys[Roles.Zswap]),
+  shielded: (cfg) => CustomShieldedWallet(cfg, shieldedBuilder).startWithSeed(derivedKeys[Roles.Zswap]),
   unshielded: (cfg) => UnshieldedWallet(cfg).startWithPublicKey(PublicKey.fromKeyStore(unshieldedKeystore)),
-  dust: (cfg) => DustWallet(cfg).startWithSeed(
+  dust: (cfg) => CustomDustWallet(cfg, dustBuilder).startWithSeed(
     derivedKeys[Roles.Dust],
     ledger.LedgerParameters.initialParameters().dust,
   ),
@@ -268,9 +300,9 @@ const checkpoint = await db.get('sdkState', key);
 if (checkpoint) {
   const facade = await WalletFacade.init({
     configuration: { ...config, txHistoryStorage: InMemoryTransactionHistoryStorage.fromSerialized(checkpoint.txHistory) },
-    shielded: (cfg) => ShieldedWallet(cfg).restore(checkpoint.shieldedState),
+    shielded: (cfg) => CustomShieldedWallet(cfg, shieldedBuilder).restore(checkpoint.shieldedState),
     unshielded: (cfg) => UnshieldedWallet(cfg).restore(checkpoint.unshieldedState),
-    dust: (cfg) => DustWallet(cfg).restore(checkpoint.dustState),
+    dust: (cfg) => CustomDustWallet(cfg, dustBuilder).restore(checkpoint.dustState),
     provingService: () => makeServerProvingService({ ... }),
   });
 }
@@ -288,6 +320,31 @@ if (checkpoint) {
 **Scoping:** Key checkpoints by `${environment}:${accountIndex}:${walletId}` so each wallet/network combination has independent state. Derive `walletId` from a hash of the seed (never raw seed bytes) to avoid leaking key material in storage keys or logs.
 
 **Reference:** `gsd-wallet/src/offscreen/sdkCheckpoint.ts`, `gsd-wallet/src/offscreen/walletManager.ts:initializeWalletCore`, `gsd-wallet/src/shared/storage.ts`
+
+#### Shared network event cache
+
+The indexer streams all shielded (ZswapEvents) and dust (DustLedgerEvents) events on the chain — the same events for every wallet on the same network. By default, each wallet downloads these independently. With the caching sync layer, events are written to IndexedDB as they arrive and shared across wallets.
+
+**How it works:**
+
+1. The first wallet on a network syncs from the indexer as normal. As events flow through the caching sync service, raw hex payloads are written to the `networkEvents` IndexedDB store (batched, fire-and-forget — no sync pipeline blocking).
+2. When a second wallet on the same network starts, the caching sync service replays cached events from IndexedDB before connecting to the live indexer subscription. The live subscription starts from `max(appliedIndex, maxCachedEventId)`, fetching only the delta.
+3. Cache writes are keyed by `{network}:{type}:{id}` where type is `zswap` or `dust`. Different networks have independent caches.
+
+**What's cached vs wallet-specific:**
+
+| Data | Scope | Storage |
+|------|-------|---------|
+| ZswapEvents (shielded) | Network-level — same for all wallets | `networkEvents` IndexedDB store |
+| DustLedgerEvents | Network-level — same for all wallets | `networkEvents` IndexedDB store |
+| Coins, balances, nullifiers | Wallet-specific — derived by filtering events with wallet keys | `sdkState` checkpoint store (unchanged) |
+| Unshielded transactions | Address-filtered server-side | No caching needed (fast sync) |
+
+**Implementation:** The caching layer replaces the SDK's default sync services via `V1Builder.withSync()`. `CustomShieldedWallet` (SDK export) and `CustomDustWallet` (local wrapper — the SDK doesn't export one) accept custom builders. The sync capability (`applyUpdate`) is reused unchanged from the SDK — only the event source is replaced.
+
+**Performance:** On mainnet with ~88k events per type, cache replay takes ~2 minutes (CPU-bound `ledger.Event.deserialize()`). The network download is eliminated entirely. The main benefit is for slow/unreliable connections and for avoiding redundant indexer load across multiple wallets.
+
+**Reference:** `gsd-wallet/src/offscreen/cachingSyncService.ts`, `gsd-wallet/src/offscreen/cachingDustSyncService.ts`, `gsd-wallet/src/offscreen/customDustWallet.ts`, `gsd-wallet/src/shared/storage.ts:networkEvents`
 
 #### Popup height limit
 
@@ -762,7 +819,7 @@ The indexer streams **all** ZSwap (shielded) and dust events on the chain, not j
 
 Unshielded transactions are public and can be filtered server-side, so they sync instantly.
 
-On mainnet with ~87k shielded and ~87k dust events, first sync takes several minutes. Subsequent opens should restore from cached state and only sync the delta.
+On mainnet with ~88k shielded and ~88k dust events, first sync takes several minutes. Subsequent opens restore from per-wallet checkpoints and only sync the delta. Additionally, the shared network event cache (see section 4) allows wallets on the same network to replay cached events from IndexedDB instead of re-downloading from the indexer — eliminating network I/O for all wallets after the first.
 
 ---
 
@@ -843,13 +900,16 @@ The GSD Wallet runs the facade in an offscreen document with the service worker 
 | Persistent SDK storage (checkpoint) | `src/offscreen/sdkCheckpoint.ts` | `saveCheckpoint()`, `loadCheckpoint()` |
 | SDK console interception | `src/offscreen/sdkConsoleInterceptor.ts` | `interceptSdkConsole()` |
 | Offscreen diagnostic logger | `src/offscreen/diagnosticLogger.ts` | `emit()`, `setBroadcastFn()` — in-memory, broadcasts to SW |
+| Caching shielded sync service | `src/offscreen/cachingSyncService.ts` | `makeCachingShieldedSyncService()` |
+| Caching dust sync service | `src/offscreen/cachingDustSyncService.ts` | `makeCachingDustSyncService()` |
+| Custom dust wallet factory | `src/offscreen/customDustWallet.ts` | `CustomDustWallet()` — mirrors SDK's `DustWallet()` with custom builder |
 
 **Shared:**
 
 | Pattern | File | Key function |
 |---------|------|-------------|
 | Message protocol types | `src/shared/messages.ts` | `PopupRequest`, `PopupResponse`, `OffscreenRequest`, `OffscreenBroadcast` |
-| IndexedDB schema | `src/shared/storage.ts` | `getSdkState()`, `saveSdkState()`, `getTxHistory()` |
+| IndexedDB schema | `src/shared/storage.ts` | `getSdkState()`, `saveSdkState()`, `getTxHistory()`, `getNetworkEvents()`, `putNetworkEvents()` |
 | Environment configuration | `src/shared/environments.ts` | `ENVIRONMENTS` map |
 
 **Popup + content script (unchanged):**
@@ -1001,5 +1061,6 @@ Code audit performed 2026-03-28 against wallet-sdk v3.0.0 documentation.
 
 ### Minor deviations (acceptable)
 
-- Uses `ShieldedWallet(cfg).startWithSeed()` instead of `startWithSecretKeys()` — both are valid API entry points documented in the SDK
-- Same for `DustWallet(cfg).startWithSeed()` vs `startWithSecretKey()`
+- Uses `CustomShieldedWallet(cfg, builder)` with a caching sync builder instead of the default `ShieldedWallet(cfg)` — injects a custom sync service that caches events to IndexedDB
+- Uses a local `CustomDustWallet(cfg, builder)` wrapper because the SDK doesn't export a `CustomDustWallet` — mirrors the SDK's `DustWallet` factory with builder injection support
+- Uses `.startWithSeed()` instead of `.startWithSecretKeys()` — both are valid API entry points documented in the SDK

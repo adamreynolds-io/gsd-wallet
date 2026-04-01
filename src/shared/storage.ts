@@ -6,10 +6,12 @@ import type {
   WalletStore,
   PersistedSdkState,
   Environment,
+  NetworkEventType,
+  CachedNetworkEvent,
 } from './types';
 
 const DB_NAME = 'gsd-wallet';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 type GsdDB = IDBPDatabase;
 
@@ -31,6 +33,10 @@ function getDb(): Promise<GsdDB> {
         }
         if (oldVersion < 2) {
           db.createObjectStore('sdkState', { keyPath: 'key' });
+        }
+        if (oldVersion < 3) {
+          const store = db.createObjectStore('networkEvents', { keyPath: 'key' });
+          store.createIndex('byNetworkAndType', ['network', 'type']);
         }
       },
     });
@@ -181,4 +187,84 @@ export async function deleteSdkState(
 export async function deleteAllSdkState(): Promise<void> {
   const db = await getDb();
   await db.clear('sdkState');
+}
+
+// --- Network Event Cache ---
+
+function networkEventKey(
+  network: string,
+  type: NetworkEventType,
+  id: number,
+): string {
+  return `${network}:${type}:${id}`;
+}
+
+export async function getNetworkEvents(
+  network: string,
+  type: NetworkEventType,
+  fromId: number = 0,
+): Promise<CachedNetworkEvent[]> {
+  const db = await getDb();
+  const all = await db.getAllFromIndex(
+    'networkEvents',
+    'byNetworkAndType',
+    [network, type],
+  );
+  return (all as CachedNetworkEvent[])
+    .filter((e) => e.id > fromId)
+    .sort((a, b) => a.id - b.id);
+}
+
+export async function putNetworkEvents(
+  network: string,
+  type: NetworkEventType,
+  events: Array<{ id: number; raw: string; maxId: number }>,
+): Promise<void> {
+  if (events.length === 0) return;
+  const db = await getDb();
+  const tx = db.transaction('networkEvents', 'readwrite');
+  const store = tx.objectStore('networkEvents');
+  for (const event of events) {
+    await store.put({
+      key: networkEventKey(network, type, event.id),
+      network,
+      type,
+      id: event.id,
+      raw: event.raw,
+      maxId: event.maxId,
+    } satisfies CachedNetworkEvent);
+  }
+  await tx.done;
+}
+
+export async function getMaxEventId(
+  network: string,
+  type: NetworkEventType,
+): Promise<number> {
+  const db = await getDb();
+  const all = await db.getAllFromIndex(
+    'networkEvents',
+    'byNetworkAndType',
+    [network, type],
+  );
+  if (all.length === 0) return 0;
+  return Math.max(...(all as CachedNetworkEvent[]).map((e) => e.id));
+}
+
+export async function clearNetworkEvents(
+  network: string,
+): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction('networkEvents', 'readwrite');
+  const store = tx.objectStore('networkEvents');
+  const index = store.index('byNetworkAndType');
+  // Clear both zswap and dust events for this network
+  for (const type of ['zswap', 'dust'] as const) {
+    let cursor = await index.openCursor([network, type]);
+    while (cursor) {
+      await cursor.delete();
+      cursor = await cursor.continue();
+    }
+  }
+  await tx.done;
 }

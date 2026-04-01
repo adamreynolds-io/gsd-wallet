@@ -8,8 +8,12 @@ import {
 } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { HDWallet, Roles, type Role } from '@midnight-ntwrk/wallet-sdk-hd';
-import { ShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
-import { DustWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
+import { CustomShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
+import { V1Builder as ShieldedV1Builder, Sync as ShieldedSync } from '@midnight-ntwrk/wallet-sdk-shielded/v1';
+import { V1Builder as DustV1Builder, SyncService as DustSyncService } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
+import { makeCachingShieldedSyncService } from './cachingSyncService';
+import { makeCachingDustSyncService } from './cachingDustSyncService';
+import { CustomDustWallet } from './customDustWallet';
 import { makeServerProvingService } from '@midnight-ntwrk/wallet-sdk-capabilities';
 import type { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
 import { MidnightBech32m, DustAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
@@ -252,6 +256,35 @@ export function initializeWallet(
   return initializingPromise;
 }
 
+function makeShieldedBuilder(network: string) {
+  return new ShieldedV1Builder()
+    .withDefaultTransactionType()
+    .withSync(
+      makeCachingShieldedSyncService(network),
+      ShieldedSync.makeEventsSyncCapability,
+    )
+    .withSerializationDefaults()
+    .withTransactingDefaults()
+    .withCoinSelectionDefaults()
+    .withCoinsAndBalancesDefaults()
+    .withTransactionHistoryDefaults()
+    .withKeysDefaults();
+}
+
+function makeDustBuilder(network: string) {
+  return new DustV1Builder()
+    .withDefaultTransactionType()
+    .withSync(
+      makeCachingDustSyncService(network),
+      DustSyncService.makeDefaultSyncCapability,
+    )
+    .withSerializationDefaults()
+    .withTransactingDefaults()
+    .withCoinSelectionDefaults()
+    .withCoinsAndBalancesDefaults()
+    .withKeysDefaults();
+}
+
 async function initializeWalletCore(
   seed: Uint8Array,
   environment: Environment,
@@ -350,13 +383,13 @@ async function initializeWalletCore(
       facade = await WalletFacade.init({
         configuration: config,
         shielded: (cfg) =>
-          ShieldedWallet(cfg).restore(checkpoint.shieldedState),
+          CustomShieldedWallet(cfg, makeShieldedBuilder(environment)).restore(checkpoint.shieldedState),
         unshielded: (cfg) =>
           UnshieldedWallet(cfg).restore(
             checkpoint.unshieldedState,
           ),
         dust: (cfg) =>
-          DustWallet(cfg).restore(checkpoint.dustState),
+          CustomDustWallet(cfg, makeDustBuilder(environment)).restore(checkpoint.dustState),
         provingService: () =>
           makeServerProvingService({
             provingServerUrl: new URL(
@@ -375,7 +408,7 @@ async function initializeWalletCore(
       facade = await WalletFacade.init({
         configuration: config,
         shielded: (cfg) =>
-          ShieldedWallet(cfg).startWithSeed(
+          CustomShieldedWallet(cfg, makeShieldedBuilder(environment)).startWithSeed(
             derivedKeys[Roles.Zswap],
           ),
         unshielded: (cfg) =>
@@ -383,7 +416,7 @@ async function initializeWalletCore(
             PublicKey.fromKeyStore(unshieldedKeystore),
           ),
         dust: (cfg) =>
-          DustWallet(cfg).startWithSeed(
+          CustomDustWallet(cfg, makeDustBuilder(environment)).startWithSeed(
             derivedKeys[Roles.Dust],
             ledger.LedgerParameters.initialParameters().dust,
           ),
@@ -399,7 +432,7 @@ async function initializeWalletCore(
     facade = await WalletFacade.init({
       configuration: config,
       shielded: (cfg) =>
-        ShieldedWallet(cfg).startWithSeed(
+        CustomShieldedWallet(cfg, makeShieldedBuilder(environment)).startWithSeed(
           derivedKeys[Roles.Zswap],
         ),
       unshielded: (cfg) =>
@@ -407,7 +440,7 @@ async function initializeWalletCore(
           PublicKey.fromKeyStore(unshieldedKeystore),
         ),
       dust: (cfg) =>
-        DustWallet(cfg).startWithSeed(
+        CustomDustWallet(cfg, makeDustBuilder(environment)).startWithSeed(
           derivedKeys[Roles.Dust],
           ledger.LedgerParameters.initialParameters().dust,
         ),

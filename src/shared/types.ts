@@ -182,3 +182,16 @@ export interface DiagnosticEvent {
   data?: unknown;
   elapsed?: number;
 }
+
+// --- Network Event Cache ---
+
+export type NetworkEventType = 'zswap' | 'dust';
+
+export interface CachedNetworkEvent {
+  key: string; // `${network}:${type}:${id}`
+  network: string;
+  type: NetworkEventType;
+  id: number;
+  raw: string; // hex-encoded event data
+  maxId: number;
+}
