@@ -20,8 +20,7 @@ export async function walletStoreExists(): Promise<boolean> {
 }
 
 export async function getStore(): Promise<WalletStore> {
-  const store = await getWalletStore();
-  return store ?? { wallets: [], activeEnvironment: 'undeployed', activeWalletIndex: 0 };
+  return await getWalletStore() ?? { wallets: [], activeEnvironment: 'undeployed' as Environment, activeWalletIndex: 0 };
 }
 
 export async function addWallet(
@@ -30,8 +29,15 @@ export async function addWallet(
   environment: Environment,
 ): Promise<void> {
   const store = await getStore();
+  // Append index if the name doesn't already include one (e.g. "Mainnet" → "Mainnet 0")
+  const isGenesis = /^Genesis W[0-3]$/.test(name);
+  let walletName = name;
+  if (!isGenesis) {
+    const existingCount = store.wallets.filter((w) => w.environment === environment).length;
+    walletName = `${name} ${existingCount}`;
+  }
   store.wallets.push({
-    name,
+    name: walletName,
     seed: Array.from(seed),
     environment,
   });

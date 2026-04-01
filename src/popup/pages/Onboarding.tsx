@@ -132,7 +132,7 @@ export function Onboarding() {
     for (let i = 0; i < 32; i++) {
       bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
     }
-    await createWallet(bytes, `Wallet ${index}`);
+    await createWallet(bytes, `Genesis W${index}`);
   }
 
   return (

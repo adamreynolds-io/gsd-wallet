@@ -20,13 +20,13 @@ function isGenesis(w: WalletEntry, env: string): boolean {
   return env === 'undeployed' && /^Genesis W[0-3]$/.test(w.name);
 }
 
-function displayName(
-  w: WalletEntry,
-  positionInEnv: number,
-  env: string,
-): string {
+function displayName(w: WalletEntry, positionInEnv: number, env: string): string {
   if (isGenesis(w, env)) return w.name;
-  return `${getEnvironmentLabel(env as Environment)} ${positionInEnv}`;
+  // If the stored name already has an index (e.g. "Mainnet 2"), use it
+  const envLabel = getEnvironmentLabel(env as Environment);
+  if (w.name !== envLabel) return w.name;
+  // Legacy wallet without index — generate at render time
+  return `${envLabel} ${positionInEnv}`;
 }
 
 export function WalletMenu({
@@ -127,16 +127,21 @@ export function WalletMenu({
     });
   }
 
-  function clearAll() {
-    if (!confirm('Clear all wallets?')) return;
+  function clearUserWallets() {
+    if (!confirm('Clear all user wallets? Genesis wallets will be kept.')) return;
+    if (!wallets) return;
+    // Delete non-genesis wallets in reverse index order to avoid shifting
+    const toDelete = Object.entries(wallets).flatMap(([env, ws]) =>
+      ws.filter((w) => !isGenesis(w, env)).map((w) => w.index),
+    ).sort((a, b) => b - a);
+    if (toDelete.length === 0) return;
     const port = chrome.runtime.connect({ name: 'gsd-popup' });
-    port.postMessage({ type: 'CLEAR_ALL' });
+    for (const idx of toDelete) {
+      port.postMessage({ type: 'DELETE_WALLET', index: idx });
+    }
     port.disconnect();
-    usePopupStore.getState().setHasVault(false);
-    usePopupStore.getState().setStatus('uninitialized');
-    usePopupStore.getState().setWalletState(null as never);
+    fetchWallets();
     onClose();
-    navigate('/onboarding');
   }
 
   return (
@@ -173,7 +178,6 @@ export function WalletMenu({
           const isEmpty = envWallets.length === 0;
           const isUndeployed = env === 'undeployed';
 
-          // Count non-genesis wallets for numbering
           let nonGenesisIdx = 0;
 
           return (
@@ -185,9 +189,8 @@ export function WalletMenu({
                 )}
               </div>
 
-              {envWallets.map((w) => {
-                const genesis = isGenesis(w, env);
-                const posIdx = genesis ? 0 : nonGenesisIdx++;
+              {envWallets.filter((w) => !isGenesis(w, env)).map((w) => {
+                const posIdx = nonGenesisIdx++;
                 const label = displayName(w, posIdx, env);
                 const isActive = w.index === activeIdx && env === currentEnv;
 
@@ -212,7 +215,7 @@ export function WalletMenu({
                     )}
                     <button
                       onClick={(e) => { e.stopPropagation(); copySeed(w.index); }}
-                      className={`shrink-0 px-1 py-1 text-[10px] transition-opacity ${
+                      className={`shrink-0 px-2 py-1 text-xl transition-opacity ${
                         copiedIdx === w.index
                           ? 'text-green-400 opacity-100'
                           : 'text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100'
@@ -221,15 +224,13 @@ export function WalletMenu({
                     >
                       {copiedIdx === w.index ? '\u2713' : '\u2398'}
                     </button>
-                    {!genesis && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteWallet(w.index); }}
-                        className="shrink-0 px-1 py-1 text-gray-600 hover:text-status-red opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Delete wallet"
-                      >
-                        &#x2715;
-                      </button>
-                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteWallet(w.index); }}
+                      className="shrink-0 px-1 py-1 text-gray-600 hover:text-status-red opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Delete wallet"
+                    >
+                      &#x2715;
+                    </button>
                   </div>
                 );
               })}
@@ -238,13 +239,13 @@ export function WalletMenu({
               {isUndeployed && (
                 <div className="flex gap-1 px-2.5 py-1">
                   {GENESIS_SEEDS.map((i) => {
-                    const exists = envWallets.some((w) => w.name === `Wallet ${i}`);
-                    const isActive = exists && envWallets.find((w) => w.name === `Wallet ${i}`)?.index === activeIdx;
+                    const exists = envWallets.some((w) => w.name === `Genesis W${i}`);
+                    const isActive = exists && envWallets.find((w) => w.name === `Genesis W${i}`)?.index === activeIdx;
                     return (
                       <button
                         key={i}
                         onClick={() => exists
-                          ? switchWallet(envWallets.find((w) => w.name === `Wallet ${i}`)!.index)
+                          ? switchWallet(envWallets.find((w) => w.name === `Genesis W${i}`)!.index)
                           : addGenesisWallet(i)
                         }
                         className={`text-[10px] px-1.5 py-0.5 rounded font-mono transition-colors ${
@@ -272,9 +273,9 @@ export function WalletMenu({
         <button
           role="menuitem"
           className="w-full text-left text-xs px-2.5 py-1.5 rounded text-status-red/70 hover:bg-midnight-600 hover:text-status-red transition-colors"
-          onClick={clearAll}
+          onClick={clearUserWallets}
         >
-          Clear All Wallets
+          Clear User Wallets
         </button>
       </div>
     </div>

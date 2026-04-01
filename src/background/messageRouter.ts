@@ -422,6 +422,7 @@ async function handlePopupMessage(
       case 'CLEAR_ALL': {
         await offscreenClient.request('STOP_WALLET', null);
         await stateManager.clearAll();
+        chrome.storage.session.remove(['gsdLastState', 'gsdDiagnosticEvents']);
         break;
       }
 
