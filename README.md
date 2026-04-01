@@ -1,8 +1,10 @@
-# Midnight GSD Wallet
+# G.S.D. Wallet
 
 Chrome extension wallet for dApp developers building on the [Midnight](https://midnight.network) blockchain. Designed for testing and debugging on Undeployed (local), DevNet, QANet, Preview, PreProd, and Mainnet environments.
 
 **This is not a production wallet.** Seeds are stored unencrypted. Use it to develop and test your dApps, not to hold real funds.
+
+A personal project by [Adam Reynolds](https://github.com/adamreynolds-io), Engineering Manager, Platform & Tooling @ [Shielded Technologies](https://shielded.io).
 
 ## Who is this for?
 
@@ -10,13 +12,27 @@ Chrome extension wallet for dApp developers building on the [Midnight](https://m
 - **QA engineers** verifying wallet behavior across Midnight environments
 - **SDK integrators** building their own Midnight wallet (see [Integration Guide](docs/WALLET-INTEGRATION-GUIDE.md))
 
+## Install
+
+**Option A — pre-built (recommended):**
+
+Download `dist.zip` from the [latest release](https://github.com/adamreynolds-io/gsd-wallet/releases/latest), unzip, go to `chrome://extensions`, enable Developer Mode, click "Load unpacked", select the `dist/` folder.
+
+**Option B — build from source:**
+
+```bash
+npm install
+npm run build
+```
+
+Load `dist/` as above.
+
 ## Features
 
 - **Multi-environment** — Undeployed (localhost), DevNet, QANet, Preview, PreProd, Mainnet
-- **Wallet manager menu** — unified dropdown showing all wallets grouped by network, with create/switch/delete/copy-seed actions
-- **Quick-start on localnet** — one-click import of 4 prefunded genesis wallets (W0-W3)
-- **Wallet management** — generate 24-word mnemonic or import seed phrase / hex seed
-- **Multi-wallet** — multiple wallets per environment, each with isolated sync state
+- **Wallet menu** — unified dropdown with wallets grouped by network, create/switch/delete/copy-seed
+- **Quick-start on localnet** — one-click genesis wallets (W0-W3) with prefunded NIGHT
+- **Multi-wallet** — multiple wallets per environment, each with isolated sync state and indexed names
 - **Shielded & unshielded transfers** — send tokens with ZK proving via server prover
 - **Dust operations** — register/deregister UTXOs for dust generation
 - **DApp connector** — `window.midnight` injection implementing the Midnight DApp connector API
@@ -24,42 +40,38 @@ Chrome extension wallet for dApp developers building on the [Midnight](https://m
 
 ### Sync & diagnostics
 
-- **Non-blocking sync** — UI renders immediately while the wallet syncs in the background; no blank screens or loading spinners
-- **Per-wallet sync progress** — Shielded/Unshielded/Dust progress shown in the status bar and debug tabs
-- **Sync phase in header** — current phase (Connecting/Syncing X%/Stalled/Synced) displayed next to the network selector
-- **Stall detection** — automatic detection when sync stops advancing for 30s (e.g., after WebSocket disconnect); shown as "Stalled" with warning diagnostic
-- **SDK console interception** — captures `@polkadot/api` RPC-CORE errors, WebSocket disconnects, and reconnection events that normally only appear in the browser console
-- **Persistent diagnostics** — 2000-event ring buffer persisted to `chrome.storage.session`; survives service worker restarts (Chrome kills idle SWs after ~30s)
+- **Non-blocking sync** — UI renders immediately while the wallet syncs in the background
+- **Per-wallet sync progress** — Shielded/Unshielded/Dust progress in the status bar and debug tabs
+- **Sync phase in header** — Connecting/Syncing X%/Stalled/Synced displayed next to the wallet name
+- **Stall detection** — automatic detection when sync stops advancing for 30s
+- **SDK console interception** — captures `@polkadot/api` RPC-CORE errors and WebSocket disconnects
+- **Persistent diagnostics** — 2000-event ring buffer in the SW persisted to `chrome.storage.session`; offscreen diagnostics kept in-memory (persistent document)
 - **Filterable event stream** — filter by level (DBG/INF/WRN/ERR) and category (SW/Wallet/State/Sync/SDK/DApp/API/Pop/Tx/Idx/Sto/Err)
-- **Log export** — download all diagnostic events as NDJSON with ISO timestamps for sharing in bug reports
-- **Status bar** — persistent bottom bar showing connection status, overall sync progress, and per-wallet sync detail
-- **Debug tabs** — real-time sync progress, UTXO inspection, token balances per subsystem (Dust/Shielded/Unshielded), transaction history
+- **Log export** — download all diagnostic events as NDJSON with ISO timestamps
+- **Debug tabs** — real-time sync progress, UTXO inspection, token balances per subsystem, transaction history
 - **Built-in explorer** — query the v4 indexer for transaction, block, and contract details
 
-## Quick start
+## Architecture
 
-```bash
-npm install
-npm run build
+```
+DApp <-> content script <-> service worker (23KB) <-> offscreen relay (800B) <-> Web Worker (1.7MB SDK)
 ```
 
-Load in Chrome: `chrome://extensions` → Developer mode → Load unpacked → select `dist/`
+The SDK runs in a **Web Worker** spawned by an offscreen document. Chrome does not monitor Workers for responsiveness, so heavy SDK operations (balancing, proving) never trigger "Page Unresponsive" dialogs.
 
-**Recommended:** Click the expand icon in the header to open in a full browser tab. The popup works but the full-tab view gives you much more space for the debug panel, explorer, and diagnostics.
+| Component | Role |
+|-----------|------|
+| **Service worker** | Thin message router — popup/dApp port management, session handling, state caching |
+| **Offscreen document** | Stateless relay between SW port and Worker via `postMessage` |
+| **Web Worker** | Hosts WalletFacade, all SDK operations, sync, checkpoints, diagnostics |
 
-### Localnet setup
+The offscreen document initiates the port connection to the SW. When Chrome restarts the SW, the offscreen detects the disconnect and reconnects automatically. The Worker (and SDK state) survives SW restarts.
 
-1. Start local infrastructure (node + indexer + proof server)
-2. Select "Undeployed" environment in the wallet
-3. Click W0 to import the genesis wallet with all minted NIGHT
-4. Deploy and test your contracts
+### Persistent SDK storage
 
-### Testnet setup
+SDK wallet state is checkpointed to IndexedDB on sync completion and wallet stop. On browser restart, the wallet restores from checkpoint and resumes syncing from the last saved position.
 
-1. Start a proof server: `docker run -d -p 6300:6300 ghcr.io/midnight-ntwrk/proof-server:8.0.2 midnight-proof-server -v`
-2. Select your target network (DevNet, QANet, Preview, PreProd)
-3. Import your funded wallet seed
-4. Your dApp can discover the wallet via `window.midnight`
+The offscreen document is persistent — Chrome does not garbage-collect it. No keepalive hacks are needed.
 
 ## How sync works
 
@@ -71,13 +83,29 @@ The wallet syncs three subsystems independently:
 | **Unshielded** | Only your transactions | Public — indexer can filter by address without privacy risk |
 | **Dust** | All dust events on chain | Same privacy model as shielded — local filtering |
 
-**First sync is slow on mainnet** (~87k shielded + ~87k dust events). The unshielded subsystem syncs instantly because it only streams your transactions.
+**First sync is slow on mainnet** (~87k shielded + ~87k dust events). The unshielded subsystem syncs instantly.
 
-**Persistent SDK storage** ensures sync survives Chrome's service worker lifecycle. The wallet serializes SDK state to IndexedDB every 10 seconds during sync. When Chrome kills the service worker (after ~30s idle), the next restart restores from the last checkpoint and continues syncing — no progress is lost. Full mainnet sync completes across multiple SW restarts without the user needing to keep the popup open.
+Two-phase initialization ensures the UI is never blocked:
+1. **Phase 1 (fast):** Load checkpoint, create facade, subscribe to state, emit initial state to UI
+2. **Phase 2 (background):** `facade.start()` connects to indexer/node, sync resumes; state updates flow progressively
 
-The two-phase initialization ensures the UI is never blocked:
-1. **Phase 1 (fast):** Load checkpoint from IndexedDB (if available), create facade with restored or fresh state, subscribe to state, emit initial state to UI
-2. **Phase 2 (background):** `facade.start()` connects to indexer/node, sync resumes from checkpoint offset; state updates flow to UI progressively
+## Quick start
+
+### Localnet
+
+1. Start local infrastructure (node + indexer + proof server)
+2. Select "Undeployed" environment
+3. Click W0 to import the genesis wallet with all minted NIGHT
+4. Deploy and test your contracts
+
+### Testnet / Mainnet
+
+1. Start a proof server: `docker run -d -p 6300:6300 ghcr.io/midnight-ntwrk/proof-server:8.0.2 midnight-proof-server -v`
+2. Select your target network
+3. Import your funded wallet seed
+4. Your dApp can discover the wallet via `window.midnight`
+
+**Tip:** Click the expand icon in the header to open in a full browser tab.
 
 ## DApp connector
 
@@ -85,11 +113,7 @@ The wallet injects `window.midnight[uuid]` on all pages and dispatches `midnight
 
 **17 API methods:** `getShieldedBalances`, `getUnshieldedBalances`, `getDustBalance`, `getShieldedAddresses`, `getUnshieldedAddress`, `getDustAddress`, `getConfiguration`, `getConnectionStatus`, `makeTransfer`, `balanceUnsealedTransaction`, `balanceSealedTransaction`, `submitTransaction`, `signData`, `getTxHistory`, `hintUsage`, `getProvingProvider`, `makeIntent`.
 
-`getTxHistory` returns `[]` (stub). `getProvingProvider` and `makeIntent` return errors — use `getConfiguration()` for prover URL.
-
 ## Explorer
-
-Type a transaction hash, block height, or contract address in the search field:
 
 | Input | Lookup |
 |-------|--------|
@@ -120,33 +144,27 @@ Intentional trade-offs for developer convenience:
 | DApp connections | Auto-approved, no user confirmation |
 | CSP | `wasm-unsafe-eval` required for Midnight SDK WASM |
 
+Seed material is zeroed after use in the Worker. Wallet IDs are derived from SHA-256 of the seed (never raw seed bytes in logs or storage keys).
+
 ## Known issues
 
-- **Mainnet RPC disconnects** — The mainnet RPC node (`wss://rpc.mainnet.midnight.network`) periodically drops WebSocket connections with `1000: Normal Closure`. The `@polkadot/api` SDK reconnects automatically but sync can stall temporarily. The wallet detects stalls after 30s and shows "Stalled". No user action needed — persistent storage preserves progress across SW restarts, and the offscreen keepalive document extends SW lifetime during active sync.
-- **First mainnet sync takes minutes** — ~87k shielded + ~87k dust events must be downloaded and processed client-side. This is by design for privacy (see "How sync works" above). Persistent SDK storage ensures sync completes across service worker restarts — no need to keep the popup open.
+- **Contract call transactions fail in Chrome** — `balanceUnsealedTransaction` fails with `IntentSegmentIdCollision` for contract call transactions in the Chrome extension context. The same code path succeeds in Node.js. Deploy transactions work fine. This is an upstream SDK/ledger issue — no workaround exists for dApp developers. See [#45](https://github.com/adamreynolds-io/gsd-wallet/issues/45).
+- **Mainnet RPC disconnects** — The mainnet RPC node periodically drops WebSocket connections with `1000: Normal Closure`. The SDK reconnects automatically but sync can stall temporarily.
+- **First mainnet sync takes minutes** — ~87k shielded + ~87k dust events must be processed client-side for privacy.
 
 ## Documentation
 
-- [Integration Guide](docs/WALLET-INTEGRATION-GUIDE.md) — for AI agents and developers building Midnight wallets
+- [Integration Guide](docs/WALLET-INTEGRATION-GUIDE.md) — lessons learned building this wallet, platform constraints, SDK gaps
 - [SDK Reference](docs/sdk-reference/) — wallet-sdk v3.0.0 architecture, package APIs, code examples
-
-## Scripts
-
-| Command | Description |
-|---|---|
-| `npm run build` | TypeScript check + Vite production build |
-| `npm run dev` | Vite dev server with HMR |
-| `npm run typecheck` | TypeScript `--noEmit` check |
-| `npm run preview` | Vite preview server |
 
 ## Dependencies
 
 | Category | Packages |
 |---|---|
-| Midnight SDK | `wallet-sdk-facade`, `wallet-sdk-hd`, `ledger-v8`, `dapp-connector-api` |
-| UI | React 18, React Router 7, Zustand 5, TailwindCSS 3 |
-| Storage | `idb` (IndexedDB — persistent SDK state, vault, tx history, permissions), RxJS 7 |
-| Build | Vite 6, `@crxjs/vite-plugin`, TypeScript 5.9 |
+| Midnight SDK | `wallet-sdk-facade` 3.0.0, `wallet-sdk-hd` 3.0.1, `ledger-v8` 8.0.3, `dapp-connector-api` 4.0.1 |
+| UI | React 19, React Router 7, Zustand 5, Tailwind CSS 4 |
+| Storage | `idb` (IndexedDB), RxJS 7 |
+| Build | Vite 8, `@crxjs/vite-plugin` 2.4.0, TypeScript 6 |
 | Crypto | `@scure/bip39` |
 
 ## License
