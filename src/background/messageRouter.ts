@@ -204,6 +204,13 @@ async function handleDappRequest(
       };
     }
 
+    if (session.origin !== origin) {
+      return {
+        type: 'GSD_ERROR',
+        error: { code: 'Forbidden', reason: 'Origin mismatch — session belongs to a different origin' },
+      };
+    }
+
     const apiResult = await offscreenClient.request('DAPP_API_CALL', { method, args }) as
       | { result: unknown }
       | { error: { code: string; reason: string } };

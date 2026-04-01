@@ -1,5 +1,9 @@
 # G.S.D. Wallet
 
+<p align="center">
+  <img src="docs/gsd-wallet.png" alt="GSD Wallet — full-tab dashboard showing balances, UTXOs, explorer, and real-time diagnostic events" width="900" />
+</p>
+
 Chrome extension wallet for dApp developers building on the [Midnight](https://midnight.network) blockchain. Designed for testing and debugging on Undeployed (local), DevNet, QANet, Preview, PreProd, and Mainnet environments.
 
 **This is not a production wallet.** Seeds are stored unencrypted. Use it to develop and test your dApps, not to hold real funds.

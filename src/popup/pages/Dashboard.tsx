@@ -369,8 +369,10 @@ function SyncStatusBar({ state }: { state: SerializedWalletState }) {
   const totalHighest = state.shielded.progress.highest + state.unshielded.progress.highest + state.dust.progress.highest;
   const allConnected = state.shielded.progress.connected && state.unshielded.progress.connected && state.dust.progress.connected;
   const percent = totalHighest > 0 ? Math.floor((totalApplied / totalHighest) * 100) : 0;
+  const update = usePopupStore((s) => s.updateAvailable);
+  const currentVersion = chrome.runtime.getManifest().version;
   return (
-    <div className="shrink-0 flex items-center gap-3 px-3 py-0.5 bg-midnight-900 border-t border-midnight-600 text-xs">
+    <div className="shrink-0 flex items-center gap-3 px-3 py-0.5 bg-midnight-900 border-t border-midnight-600 text-xs whitespace-nowrap overflow-x-auto">
       <span className={`shrink-0 ${allConnected ? 'text-green-400' : 'text-red-400'}`}>
         {allConnected ? 'Connected' : 'Disconnected'}
       </span>
@@ -381,6 +383,20 @@ function SyncStatusBar({ state }: { state: SerializedWalletState }) {
       <SyncDetailRow label="Shielded" color="text-fuchsia-400" progress={state.shielded.progress} percent={state.shielded.syncPercent} />
       <SyncDetailRow label="Unshielded" color="text-blue-400" progress={state.unshielded.progress} percent={state.unshielded.syncPercent} />
       <SyncDetailRow label="Dust" color="text-amber-400" progress={state.dust.progress} percent={state.dust.syncPercent} />
+      <span className="text-midnight-600">|</span>
+      {update ? (
+        <a
+          href={update.releaseUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 text-amber-400 hover:text-amber-300 transition-colors"
+          title={`Update available: v${update.latestVersion}`}
+        >
+          v{currentVersion} → v{update.latestVersion}
+        </a>
+      ) : (
+        <span className="shrink-0 text-white">v{currentVersion}</span>
+      )}
     </div>
   );
 }
@@ -649,9 +665,7 @@ function SyncDetailRow({ label, color, progress, percent }: {
     >
       <span className={`shrink-0 ${color}`}>{label}</span>
       <span className="text-gray-500 font-mono">
-        {done
-          ? `${abbreviateCount(progress.applied)} synced`
-          : `${abbreviateCount(progress.applied)} / ${abbreviateCount(progress.highest)}`}
+        {abbreviateCount(progress.applied)} / {abbreviateCount(progress.highest)}
       </span>
     </div>
   );

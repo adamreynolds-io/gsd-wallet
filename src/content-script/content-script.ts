@@ -76,7 +76,7 @@ window.addEventListener('message', (event) => {
   sendViaSw(requestId, payload, window.location.origin, (response) => {
     window.postMessage(
       { source: CONTENT_SRC, requestId, payload: response },
-      '*',
+      window.location.origin,
     );
   });
 });

@@ -64,7 +64,7 @@ function sendRequest(payload: unknown): Promise<unknown> {
         requestId,
         payload,
       },
-      '*',
+      window.location.origin,
     );
   });
 }

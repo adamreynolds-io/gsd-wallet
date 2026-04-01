@@ -218,7 +218,7 @@ export function WalletMenu({
                       className={`shrink-0 px-2 py-1 text-xl transition-opacity ${
                         copiedIdx === w.index
                           ? 'text-green-400 opacity-100'
-                          : 'text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100'
+                          : 'text-white/60 hover:text-white opacity-0 group-hover:opacity-100'
                       }`}
                       title="Copy seed hex"
                     >
@@ -226,7 +226,7 @@ export function WalletMenu({
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteWallet(w.index); }}
-                      className="shrink-0 px-1 py-1 text-gray-600 hover:text-status-red opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="shrink-0 px-1 py-1 text-white/60 hover:text-status-red opacity-0 group-hover:opacity-100 transition-opacity"
                       title="Delete wallet"
                     >
                       &#x2715;
