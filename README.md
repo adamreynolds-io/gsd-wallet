@@ -1,5 +1,7 @@
 # G.S.D. Wallet
 
+There was a [bug](https://github.com/adamreynolds-io/gsd-wallet/issues/10), so I built this...then people liked it and it took on a life of its own. My pain is your gain. If you're developing on Midnight, then this is the best wallet for you.
+
 <p align="center">
   <img src="docs/gsd-wallet.png" alt="GSD Wallet — full-tab dashboard showing balances, UTXOs, explorer, and real-time diagnostic events" width="900" />
 </p>
