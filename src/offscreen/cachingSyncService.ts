@@ -35,6 +35,11 @@ function decodeEventPayload(id: number, raw: string, maxId: number): EventsSyncU
 /**
  * Builds a stream that replays cached shielded events from IndexedDB.
  */
+/**
+ * Builds a cached stream that sends raw hex events without per-event
+ * deserialization. Paired with `makeBulkReplayShieldedSyncCapability`
+ * which calls `replayEventsFromRaw` in a single WASM call per batch.
+ */
 function makeCachedStream(
   network: string,
   fromId: number,
@@ -58,12 +63,15 @@ function makeCachedStream(
       }),
     ),
     Stream.flatMap((events) => Stream.fromIterable(events)),
-    Stream.mapEffect((cached) =>
-      Effect.try({
-        try: () => decodeEventPayload(cached.id, cached.raw, cached.maxId),
-        catch: (err) => new SyncWalletError({ message: String(err), cause: err }),
-      }),
-    ),
+    // Pass raw hex without deserializing — the bulk sync capability
+    // handles deserialization in a single WASM call per batch
+    Stream.map((cached) => ({
+      _tag: 'EventsSyncUpdate' as const,
+      id: cached.id,
+      maxId: cached.maxId,
+      event: null as unknown as ledger.Event,
+      _raw: cached.raw,
+    })),
     Stream.groupedWithin(batchSize, Duration.millis(1)),
     Stream.map(Chunk.toArray),
     Stream.map((data) => WalletSyncUpdate.create(data, secretKeys)),
@@ -129,15 +137,20 @@ function makeLiveStream(
     ),
     Stream.mapError((err) => new SyncWalletError({ message: String(err), cause: err })),
     Stream.map((subscription) => subscription.zswapLedgerEvents as { id: number; raw: string; maxId: number }),
-    Stream.groupedWithin(batchSize, Duration.millis(1)),
+    // 1000-event batches during catch-up, self-adjusting to smaller when synced
+    Stream.groupedWithin(1000, Duration.millis(100)),
     Stream.map(Chunk.toArray),
-    Stream.mapEffect((batch) => {
-      // Fire-and-forget cache write — don't block the sync pipeline
+    Stream.map((batch) => {
+      // Fire-and-forget cache write
       void putNetworkEvents(network, 'zswap', batch);
-      return Effect.try({
-        try: () => batch.map((e) => decodeEventPayload(e.id, e.raw, e.maxId)),
-        catch: (err) => new SyncWalletError({ message: String(err), cause: err }),
-      });
+      // Pass _raw so bulk capability uses replayEventsFromRaw
+      return batch.map((e) => ({
+        _tag: 'EventsSyncUpdate' as const,
+        id: e.id,
+        maxId: e.maxId,
+        event: null as unknown as ledger.Event,
+        _raw: e.raw,
+      }));
     }),
     Stream.map((data) => WalletSyncUpdate.create(data, secretKeys)),
     Stream.schedule(Schedule.spaced(Duration.millis(4))),
@@ -176,9 +189,11 @@ export function makeCachingShieldedSyncService(
         return makeLiveStream(network, appliedIndex, config, secretKeys);
       }
 
+      // Bulk WASM call handles deserialization — use large batches for cache
+      const cacheBatchSize = 1000;
       const cachedStream = preScanned
         ? makePreScannedStream(network, appliedIndex, secretKeys)
-        : makeCachedStream(network, appliedIndex, batchSize, secretKeys);
+        : makeCachedStream(network, appliedIndex, cacheBatchSize, secretKeys);
 
       const liveStream = pipe(
         Stream.fromEffect(Effect.promise(() => getMaxEventId(network, 'zswap'))),
@@ -191,6 +206,77 @@ export function makeCachingShieldedSyncService(
       return Stream.concat(cachedStream, liveStream);
     },
   });
+}
+
+/**
+ * Sync capability that uses `replayEventsFromRaw` for bulk WASM
+ * deserialization + replay in a single call per batch.
+ *
+ * Events carry a `_raw` hex string (set by `makeCachedStream`). For live
+ * events without `_raw`, falls back to standard `CoreWallet.replayEvents`.
+ */
+export function makeBulkReplayShieldedSyncCapability(): Sync.SyncCapability<CoreWallet, WalletSyncUpdate> {
+  return {
+    applyUpdate: (state, wrappedUpdate) => {
+      if (wrappedUpdate.updates.length === 0) return state;
+      const lastUpdate = wrappedUpdate.updates[wrappedUpdate.updates.length - 1]!;
+      const nextIndex = BigInt(lastUpdate.id);
+      const highestRelevantWalletIndex = BigInt(lastUpdate.maxId);
+
+      if (nextIndex <= state.progress.appliedIndex) {
+        return CoreWallet.updateProgress(state, {
+          highestRelevantWalletIndex,
+          isConnected: true,
+        });
+      }
+
+      // Check if events carry raw hex (from cached stream)
+      const rawEvents = wrappedUpdate.updates as Array<EventsSyncUpdate & { _raw?: string }>;
+      const hasRaw = rawEvents[0]?._raw !== undefined;
+
+      // Use bulk WASM path if available (custom ledger build), else per-event
+      const hasBulkApi = hasRaw && typeof (state.state as unknown as Record<string, unknown>)['replayEventsFromRaw'] === 'function';
+
+      let newState: typeof state;
+      if (hasBulkApi) {
+        const byteArrays = rawEvents.map((e) => Buffer.from(e._raw!, 'hex'));
+        const totalLen = byteArrays.reduce((sum, b) => sum + b.length, 0);
+        const concat = new Uint8Array(totalLen);
+        const lengths = new Uint32Array(byteArrays.length);
+        let offset = 0;
+        for (let i = 0; i < byteArrays.length; i++) {
+          const b = byteArrays[i]!;
+          concat.set(b, offset);
+          lengths[i] = b.length;
+          offset += b.length;
+        }
+        const newLocalState = (state.state as unknown as {
+          replayEventsFromRaw(keys: ledger.ZswapSecretKeys, concat: Uint8Array, lengths: Uint32Array): ledger.ZswapLocalState;
+        }).replayEventsFromRaw(wrappedUpdate.secretKeys, concat, lengths);
+        newState = CoreWallet.init(newLocalState, wrappedUpdate.secretKeys, state.networkId);
+      } else if (hasRaw) {
+        // Fallback: deserialize per-event from raw hex
+        const events = rawEvents.map((e) => {
+          const bytes = new Uint8Array(Buffer.from(e._raw!, 'hex'));
+          return ledger.Event.deserialize(bytes);
+        });
+        newState = CoreWallet.replayEvents(state, wrappedUpdate.secretKeys, events);
+      } else {
+        // Live stream: events already deserialized
+        newState = CoreWallet.replayEvents(
+          state,
+          wrappedUpdate.secretKeys,
+          wrappedUpdate.updates.map((u) => u.event),
+        );
+      }
+
+      return CoreWallet.updateProgress(newState, {
+        highestRelevantWalletIndex,
+        appliedIndex: nextIndex,
+        isConnected: true,
+      });
+    },
+  };
 }
 
 /**

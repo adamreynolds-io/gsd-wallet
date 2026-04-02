@@ -59,6 +59,7 @@ Load `dist/` as above.
 - **Shared event cache** — network events cached in IndexedDB, shared across wallets on the same network
 - **Bundled mainnet snapshot** — 88k pre-built events for zero-download first sync
 - **Cache export** — download event cache as NDJSON for sharing or backup
+- **Per-type sync progress** — individual cache/live source, events/second rate, and ETA per wallet subsystem (e.g. `Shielded 68% cache | 505 evt/s ~56s`)
 
 ## Architecture
 
@@ -94,7 +95,7 @@ The wallet syncs three subsystems independently:
 | **Unshielded** | Only your transactions | Public — indexer can filter by address without privacy risk |
 | **Dust** | All dust events on chain | Same privacy model as shielded — local filtering |
 
-**First sync is slow on mainnet** (~89k shielded + ~89k dust events), but a bundled cache snapshot ships with the extension — fresh install syncs from local cache in ~3 min instead of 6+ min from the indexer. The unshielded subsystem syncs instantly.
+**First sync is slow on mainnet** (~89k shielded + ~89k dust events), but a bundled cache snapshot ships with the extension — fresh install syncs from local cache in ~1:49 (with custom ledger WASM using bulk `replayEventsFromRaw`) or ~3:17 (with the official SDK using per-event fallback), down from 6+ min from the indexer. The unshielded subsystem syncs instantly.
 
 Two-phase initialization ensures the UI is never blocked:
 1. **Phase 1 (fast):** Load checkpoint, create facade, subscribe to state, emit initial state to UI
@@ -161,7 +162,7 @@ Seed material is zeroed after use in the Worker. Wallet IDs are derived from SHA
 
 - **Contract call transactions fail in Chrome** — `balanceUnsealedTransaction` fails with `IntentSegmentIdCollision` for contract call transactions in the Chrome extension context. The same code path succeeds in Node.js. Deploy transactions work fine. This is an upstream SDK/ledger issue — no workaround exists for dApp developers. See [#45](https://github.com/adamreynolds-io/gsd-wallet/issues/45).
 - **Mainnet RPC disconnects** — The mainnet RPC node periodically drops WebSocket connections with `1000: Normal Closure`. The SDK reconnects automatically but sync can stall temporarily.
-- **First mainnet sync takes ~3 min** — ~89k shielded + ~89k dust events are replayed from the bundled cache snapshot (was 6+ min from indexer). Subsequent opens resume from per-wallet checkpoints.
+- **First mainnet sync takes ~1:49–3:17** — ~89k shielded + ~89k dust events are replayed from the bundled cache snapshot. ~1:49 with custom ledger WASM (`replayEventsFromRaw` bulk path); ~3:17 with the official SDK (per-event fallback). Was 6+ min from indexer. Subsequent opens resume from per-wallet checkpoints.
 
 ## Documentation
 

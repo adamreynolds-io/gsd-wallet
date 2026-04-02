@@ -1,6 +1,6 @@
 {
   "name": "gsd-wallet",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "description": "GSD Wallet — Chrome extension for Midnight",
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@midnight-ntwrk/dapp-connector-api": "4.0.1",
+    "@midnight-ntwrk/ledger-v8": "8.0.3",
     "@midnight-ntwrk/wallet-sdk-facade": "3.0.0",
     "@midnight-ntwrk/wallet-sdk-hd": "3.0.1",
     "@scure/bip39": "2.0.1",

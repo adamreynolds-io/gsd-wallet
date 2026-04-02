@@ -65,12 +65,32 @@ async function handleScan(request: ScanRequest): Promise<void> {
       return;
     }
 
-    const events = cachedEvents.map((e) => {
-      const bytes = new Uint8Array(Buffer.from(e.raw, 'hex'));
-      return ledger.Event.deserialize(bytes);
-    });
+    // Use bulk WASM if available, else per-event fallback
+    const hasBulk = typeof (wallet.state as unknown as Record<string, unknown>)['replayEventsFromRaw'] === 'function';
 
-    wallet = ShieldedCoreWallet.replayEvents(wallet, secretKeys, events);
+    if (hasBulk) {
+      const byteArrays = cachedEvents.map((e) => Buffer.from(e.raw, 'hex'));
+      const totalLen = byteArrays.reduce((sum, b) => sum + b.length, 0);
+      const concat = new Uint8Array(totalLen);
+      const lengths = new Uint32Array(byteArrays.length);
+      let offset = 0;
+      for (let i = 0; i < byteArrays.length; i++) {
+        const b = byteArrays[i]!;
+        concat.set(b, offset);
+        lengths[i] = b.length;
+        offset += b.length;
+      }
+      const newState = (wallet.state as unknown as {
+        replayEventsFromRaw(keys: ledger.ZswapSecretKeys, c: Uint8Array, l: Uint32Array): ledger.ZswapLocalState;
+      }).replayEventsFromRaw(secretKeys, concat, lengths);
+      wallet = ShieldedCoreWallet.init(newState, secretKeys, networkId);
+    } else {
+      const events = cachedEvents.map((e) => {
+        const bytes = new Uint8Array(Buffer.from(e.raw, 'hex'));
+        return ledger.Event.deserialize(bytes);
+      });
+      wallet = ShieldedCoreWallet.replayEvents(wallet, secretKeys, events);
+    }
 
     const coinCount = Object.keys(wallet.coinHashes).length;
     const matched = coinCount > 0;
@@ -116,12 +136,31 @@ async function handleScan(request: ScanRequest): Promise<void> {
       return;
     }
 
-    const events = cachedEvents.map((e) => {
-      const bytes = new Uint8Array(Buffer.from(e.raw, 'hex'));
-      return ledger.Event.deserialize(bytes);
-    });
+    const hasBulk = typeof (wallet.state as unknown as Record<string, unknown>)['replayEventsFromRaw'] === 'function';
 
-    wallet = DustCoreWallet.applyEvents(wallet, secretKey, events, new Date());
+    if (hasBulk) {
+      const byteArrays = cachedEvents.map((e) => Buffer.from(e.raw, 'hex'));
+      const totalLen = byteArrays.reduce((sum, b) => sum + b.length, 0);
+      const concat = new Uint8Array(totalLen);
+      const lengths = new Uint32Array(byteArrays.length);
+      let offset = 0;
+      for (let i = 0; i < byteArrays.length; i++) {
+        const b = byteArrays[i]!;
+        concat.set(b, offset);
+        lengths[i] = b.length;
+        offset += b.length;
+      }
+      const newState = (wallet.state as unknown as {
+        replayEventsFromRaw(sk: ledger.DustSecretKey, c: Uint8Array, l: Uint32Array): ledger.DustLocalState;
+      }).replayEventsFromRaw(secretKey, concat, lengths);
+      wallet = DustCoreWallet.init(newState, secretKey, networkId);
+    } else {
+      const events = cachedEvents.map((e) => {
+        const bytes = new Uint8Array(Buffer.from(e.raw, 'hex'));
+        return ledger.Event.deserialize(bytes);
+      });
+      wallet = DustCoreWallet.applyEvents(wallet, secretKey, events, new Date());
+    }
 
     const coinCount = wallet.pendingDust.length;
     const matched = coinCount > 0;

@@ -11,8 +11,8 @@ import { HDWallet, Roles, type Role } from '@midnight-ntwrk/wallet-sdk-hd';
 import { CustomShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
 import { V1Builder as ShieldedV1Builder, Sync as ShieldedSync } from '@midnight-ntwrk/wallet-sdk-shielded/v1';
 import { V1Builder as DustV1Builder, SyncService as DustSyncService } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
-import { makeCachingShieldedSyncService, makeSkipReplayShieldedSyncCapability } from './cachingSyncService';
-import { makeCachingDustSyncService, makeSkipReplayDustSyncCapability } from './cachingDustSyncService';
+import { makeCachingShieldedSyncService, makeBulkReplayShieldedSyncCapability, makeSkipReplayShieldedSyncCapability } from './cachingSyncService';
+import { makeCachingDustSyncService, makeBulkReplayDustSyncCapability, makeSkipReplayDustSyncCapability } from './cachingDustSyncService';
 import { getMaxEventId } from '@shared/storage';
 import { CustomDustWallet } from './customDustWallet';
 import { makeServerProvingService } from '@midnight-ntwrk/wallet-sdk-capabilities';
@@ -263,7 +263,7 @@ function makeShieldedBuilder(network: string, skipCache = false, preScanned = fa
     .withDefaultTransactionType()
     .withSync(
       makeCachingShieldedSyncService(network, skipCache, preScanned),
-      preScanned ? makeSkipReplayShieldedSyncCapability : ShieldedSync.makeEventsSyncCapability,
+      preScanned ? makeSkipReplayShieldedSyncCapability : makeBulkReplayShieldedSyncCapability,
     )
     .withSerializationDefaults()
     .withTransactingDefaults()
@@ -278,7 +278,7 @@ function makeDustBuilder(network: string, skipCache = false, preScanned = false)
     .withDefaultTransactionType()
     .withSync(
       makeCachingDustSyncService(network, skipCache, preScanned),
-      preScanned ? makeSkipReplayDustSyncCapability : DustSyncService.makeDefaultSyncCapability,
+      preScanned ? makeSkipReplayDustSyncCapability : makeBulkReplayDustSyncCapability,
     )
     .withSerializationDefaults()
     .withTransactingDefaults()
@@ -606,6 +606,7 @@ async function initializeWalletCore(
   let lastStatus = '';
   let lastPhase = '';
   let lastProgressEmit = 0;
+  const lastAppliedPer = { shielded: 0, dust: 0 };
   let lastAppliedTotal = 0;
   let lastAdvanceTime = Date.now();
   let stallWarned = false;
@@ -678,12 +679,29 @@ async function initializeWalletCore(
         stallWarned = true;
       }
 
-      emit('debug', 'sync', isStalled ? `Sync progress (stalled ${stallSeconds}s)` : 'Sync progress', {
-        shielded: `${serialized.shielded.progress.applied}/${serialized.shielded.progress.highest} (${serialized.shielded.syncPercent}%)`,
-        unshielded: `${serialized.unshielded.progress.applied}/${serialized.unshielded.progress.highest} (${serialized.unshielded.syncPercent}%)`,
-        dust: `${serialized.dust.progress.applied}/${serialized.dust.progress.highest} (${serialized.dust.syncPercent}%)`,
-        overall: serialized.overallSyncPercent,
-      });
+      if (isStalled) {
+        emit('warn', 'sync', `Stalled ${stallSeconds}s`, { overall: serialized.overallSyncPercent });
+      } else {
+        const elapsed = Math.max(1, (now - lastProgressEmit) / 1000);
+
+        for (const [label, key] of [['Shielded', 'shielded'], ['Dust', 'dust']] as const) {
+          const sub = serialized[key];
+          const applied = sub.progress.applied;
+          const highest = sub.progress.highest;
+          const prev = lastAppliedPer[key];
+          const rate = Math.round((applied - prev) / elapsed);
+          lastAppliedPer[key] = applied;
+
+          if (sub.syncPercent >= 100 && highest > 0) continue;
+          if (highest === 0 && !sub.progress.connected) continue;
+
+          const source = rate > 200 ? 'cache' : 'live';
+          const remaining = rate > 0 ? Math.round((highest - applied) / rate) : 0;
+          const etaStr = remaining > 0 ? ` ~${remaining}s` : '';
+
+          emit('debug', 'sync', `${label} ${sub.syncPercent}% ${source} | ${rate} evt/s${etaStr}`);
+        }
+      }
       lastProgressEmit = now;
     }
 

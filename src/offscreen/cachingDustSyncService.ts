@@ -1,4 +1,5 @@
 import { Chunk, Duration, Effect, Either, pipe, Schedule, Schema, Scope, Stream } from 'effect';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import type { DustSecretKey } from '@midnight-ntwrk/ledger-v8';
 import { DustLedgerEvents } from '@midnight-ntwrk/wallet-sdk-indexer-client';
 import {
@@ -43,7 +44,7 @@ function makeCachedStream(
   fromId: number,
   secretKey: DustSecretKey,
 ): Stream.Stream<WalletSyncUpdate, SyncWalletError> {
-  const batchSize = 10;
+  const batchSize = 1000; // Large batches — bulk WASM call handles deserialization
   return pipe(
     Stream.fromEffect(
       Effect.promise(async () => {
@@ -61,12 +62,12 @@ function makeCachedStream(
       }),
     ),
     Stream.flatMap((events) => Stream.fromIterable(events)),
-    Stream.mapEffect((cached) =>
-      Effect.try({
-        try: () => decodeEventPayload(cached.id, cached.raw, cached.maxId),
-        catch: (err) => new SyncWalletError({ message: String(err), cause: err }),
-      }),
-    ),
+    Stream.map((cached) => ({
+      id: cached.id,
+      raw: null as unknown as import('@midnight-ntwrk/ledger-v8').Event,
+      maxId: cached.maxId,
+      _raw: cached.raw,
+    })),
     Stream.groupedWithin(batchSize, Duration.millis(1)),
     Stream.map(Chunk.toArray),
     Stream.map((data) => WalletSyncUpdate.create(data, secretKey, new Date())),
@@ -133,15 +134,16 @@ function makeLiveStream(
     ),
     Stream.mapError((err) => new SyncWalletError({ message: String(err), cause: err })),
     Stream.map((subscription) => subscription.dustLedgerEvents as { id: number; raw: string; maxId: number }),
-    Stream.groupedWithin(batchSize, Duration.millis(1)),
+    Stream.groupedWithin(1000, Duration.millis(100)),
     Stream.map(Chunk.toArray),
-    Stream.mapEffect((batch) => {
-      // Fire-and-forget cache write — don't block the sync pipeline
+    Stream.map((batch) => {
       void putNetworkEvents(network, 'dust', batch);
-      return Effect.try({
-        try: () => batch.map((e) => decodeEventPayload(e.id, e.raw, e.maxId)),
-        catch: (err) => new SyncWalletError({ message: String(err), cause: err }),
-      });
+      return batch.map((e) => ({
+        id: e.id,
+        raw: null as unknown as import('@midnight-ntwrk/ledger-v8').Event,
+        maxId: e.maxId,
+        _raw: e.raw,
+      }));
     }),
     Stream.map((data) => WalletSyncUpdate.create(data, secretKey, new Date())),
     Stream.schedule(Schedule.spaced(Duration.millis(4))),
@@ -209,6 +211,65 @@ export function makeCachingDustSyncService(
  *
  * Used after scan workers confirmed zero matches.
  */
+/**
+ * Bulk replay capability using `replayEventsFromRaw` for cached dust events.
+ */
+export function makeBulkReplayDustSyncCapability(): DustSyncService.SyncCapability<CoreWallet, WalletSyncUpdate> {
+  return {
+    applyUpdate: (state, wrappedUpdate) => {
+      const { updates, secretKey } = wrappedUpdate;
+      if (updates.length === 0) return state;
+      const lastUpdate = updates[updates.length - 1]!;
+      const nextIndex = BigInt(lastUpdate.id);
+      const highestRelevantWalletIndex = BigInt(lastUpdate.maxId);
+
+      if (nextIndex <= state.progress.appliedIndex) {
+        return CoreWallet.updateProgress(state, { highestRelevantWalletIndex, isConnected: true });
+      }
+
+      const rawUpdates = updates as Array<typeof updates[number] & { _raw?: string }>;
+      const hasRaw = rawUpdates[0]?._raw !== undefined;
+
+      const hasBulkApi = hasRaw && typeof (state.state as unknown as Record<string, unknown>)['replayEventsFromRaw'] === 'function';
+
+      let newState: typeof state;
+      if (hasBulkApi) {
+        const byteArrays = rawUpdates.map((e) => Buffer.from(e._raw!, 'hex'));
+        const totalLen = byteArrays.reduce((sum, b) => sum + b.length, 0);
+        const concat = new Uint8Array(totalLen);
+        const lengths = new Uint32Array(byteArrays.length);
+        let offset = 0;
+        for (let i = 0; i < byteArrays.length; i++) {
+          const b = byteArrays[i]!;
+          concat.set(b, offset);
+          lengths[i] = b.length;
+          offset += b.length;
+        }
+        const newLocalState = (state.state as unknown as {
+          replayEventsFromRaw(sk: import('@midnight-ntwrk/ledger-v8').DustSecretKey, concat: Uint8Array, lengths: Uint32Array): import('@midnight-ntwrk/ledger-v8').DustLocalState;
+        }).replayEventsFromRaw(secretKey, concat, lengths);
+        newState = CoreWallet.init(newLocalState, secretKey, state.networkId);
+      } else if (hasRaw) {
+        // Fallback: deserialize per-event from raw hex
+        const events = rawUpdates.map((e) => {
+          const bytes = new Uint8Array(Buffer.from(e._raw!, 'hex'));
+          return ledger.Event.deserialize(bytes);
+        });
+        newState = CoreWallet.applyEvents(state, secretKey, events, wrappedUpdate.timestamp);
+      } else {
+        const events = updates.map((u) => u.raw).filter((event) => event !== null);
+        newState = CoreWallet.applyEvents(state, secretKey, events, wrappedUpdate.timestamp);
+      }
+
+      return CoreWallet.updateProgress(newState, {
+        appliedIndex: nextIndex,
+        highestRelevantWalletIndex,
+        isConnected: true,
+      });
+    },
+  };
+}
+
 export function makeSkipReplayDustSyncCapability(): DustSyncService.SyncCapability<CoreWallet, WalletSyncUpdate> {
   return {
     applyUpdate: (state, wrappedUpdate) => {
