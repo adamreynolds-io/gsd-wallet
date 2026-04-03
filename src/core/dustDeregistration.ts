@@ -3,16 +3,23 @@ import type {
   UtxoWithMeta,
 } from '@midnight-ntwrk/wallet-sdk-facade';
 import type { UnshieldedKeystore } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
+import type * as ledger from '@midnight-ntwrk/ledger-v8';
 import type { TransactionResult } from '@shared/types';
 
 export interface DustDeregistrationParams {
   nightUtxos: UtxoWithMeta[];
 }
 
+export interface DeregistrationSecretKeys {
+  shieldedSecretKeys: ledger.ZswapSecretKeys;
+  dustSecretKey: ledger.DustSecretKey;
+}
+
 export async function executeDustDeregistration(
   facade: WalletFacade,
   params: DustDeregistrationParams,
   unshieldedKeystore: UnshieldedKeystore,
+  secretKeys: DeregistrationSecretKeys,
 ): Promise<TransactionResult> {
   try {
     if (params.nightUtxos.length === 0) {
@@ -23,13 +30,23 @@ export async function executeDustDeregistration(
       };
     }
 
-    const recipe = await facade.deregisterFromDustGeneration(
+    const deregRecipe = await facade.deregisterFromDustGeneration(
       params.nightUtxos,
       unshieldedKeystore.getPublicKey(),
       (payload) => unshieldedKeystore.signData(payload),
     );
 
-    const provenTx = await facade.finalizeRecipe(recipe);
+    // Deregistration requires dust fee balancing (SDK: deregistration.ts)
+    const balancedRecipe = await facade.balanceUnprovenTransaction(
+      deregRecipe.transaction,
+      secretKeys,
+      {
+        ttl: new Date(Date.now() + 30 * 60 * 1000),
+        tokenKindsToBalance: ['dust'],
+      },
+    );
+
+    const provenTx = await facade.finalizeRecipe(balancedRecipe);
     const txId = await facade.submitTransaction(provenTx);
 
     return { success: true, txId };

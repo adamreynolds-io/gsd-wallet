@@ -177,6 +177,7 @@ async function handleApiCallInner(
     case 'submitTransaction': {
       const { facade } = requireWallet();
       const txHex = args[0] as string;
+      emit('warn', 'tx', 'BYPASS: auto-submitting transaction (production wallet would show confirmation dialog)', { hexLength: txHex.length });
       emit('info', 'tx', 'submitTransaction: deserializing', { hexLength: txHex.length });
       const ledger = await import('@midnight-ntwrk/ledger-v8');
       const txBytes = hexToBytes(txHex);
@@ -234,6 +235,7 @@ async function handleApiCallInner(
       );
       emit('info', 'tx', 'balanceUnsealed: balanced', undefined, Date.now() - t);
 
+      emit('warn', 'tx', 'BYPASS: auto-signing transaction (production wallet would show sign dialog)');
       emit('info', 'tx', 'balanceUnsealed: signing');
       await yieldToEventLoop();
       t = Date.now();
@@ -334,6 +336,7 @@ async function handleApiCallInner(
       });
       emit('info', 'tx', 'makeTransfer: recipe built', undefined, Date.now() - t);
 
+      emit('warn', 'tx', 'BYPASS: auto-signing transfer (production wallet would show sign dialog)');
       emit('info', 'tx', 'makeTransfer: signing');
       await yieldToEventLoop();
       t = Date.now();
@@ -360,6 +363,9 @@ async function handleApiCallInner(
       if (!keystore) return err('InternalError', 'Keystore not available');
       const data = args[0] as string;
       const options = args[1] as { encoding: string; keyType: string };
+      emit('warn', 'tx', 'BYPASS: auto-signing data (production wallet would show data and request approval)', {
+        encoding: options.encoding, dataLength: data.length,
+      });
 
       let dataBytes: Uint8Array;
       if (options.encoding === 'hex') {

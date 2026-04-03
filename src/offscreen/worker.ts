@@ -11,6 +11,11 @@ if (!(globalThis as Record<string, unknown>)['assert']) {
   (globalThis as Record<string, unknown>)['assert'] = assertFn;
 }
 
+// WebSocket wrapper installed as side effect of wsTracker import.
+// Must be the first import that touches globalThis.WebSocket — all
+// other modules (including @polkadot/api) will see the wrapped version.
+import './wsTracker';
+
 // Console interception before SDK imports so all SDK logs are captured
 import { interceptSdkConsole } from './sdkConsoleInterceptor';
 interceptSdkConsole();
@@ -219,7 +224,8 @@ async function handleDustRegister(
 async function handleDustDeregister(utxoIds: string[]): Promise<TransactionResult> {
   const facade = walletManager.getFacade();
   const keystore = walletManager.getKeystore();
-  if (!facade || !keystore) {
+  const secretKeys = walletManager.getSecretKeys();
+  if (!facade || !keystore || !secretKeys) {
     return { success: false, error: 'Wallet not initialized' };
   }
   const wallet = walletManager.getActiveWallet();
@@ -236,6 +242,7 @@ async function handleDustDeregister(utxoIds: string[]): Promise<TransactionResul
     facade,
     { nightUtxos: [...deregUtxos] },
     keystore,
+    secretKeys,
   );
 
   if (result.success) {

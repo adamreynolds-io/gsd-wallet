@@ -89,11 +89,13 @@ import { mnemonicToEntropy, generateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 
 const mnemonic = generateMnemonic(wordlist, 256); // 24 words
-const entropy = mnemonicToEntropy(mnemonic, wordlist);
-const seed = new Uint8Array(entropy.slice(0, 32));
+const entropy = mnemonicToEntropy(mnemonic, wordlist); // 32 bytes for 256-bit mnemonic
+const seed = new Uint8Array(entropy);
 ```
 
 **Trap:** Using `mnemonicToSeedSync` produces a different 64-byte seed via PBKDF2. Truncating it to 32 bytes gives you a seed that derives completely different keys from the same mnemonic. The official SDK tests confirm `mnemonicToEntropy` is the correct conversion.
+
+**Trap:** Do not `.slice(0, 32)` the entropy. A 256-bit mnemonic (24 words) produces exactly 32 bytes of entropy — slicing is a no-op but looks like intentional truncation of cryptographic material. If the mnemonic strength ever changed, silent truncation would destroy key material.
 
 ### Step 1: Derive keys from seed
 
@@ -1043,24 +1045,38 @@ The diagnosis was verified with [adamreynolds-io/issue-734-validation](https://g
 
 ---
 
-## 14. Audit Findings (GSD Wallet v0.1.0)
+## 14. Audit Findings (GSD Wallet v0.6.1)
 
-Code audit performed 2026-03-28 against wallet-sdk v3.0.0 documentation.
+Code audit performed 2026-04-04 against wallet-sdk v3.0.0 documentation.
 
 ### Correct implementations
 
 | Area | Status |
 |------|--------|
-| HD key derivation (tagged union checks, memory cleanup) | Correct |
+| HD key derivation (tagged union checks, per-role retry, memory cleanup) | Correct |
 | WalletFacade two-phase init (init → subscribe → start in background) | Correct |
 | State serialization (BigInt, address encoding, sync progress) | Correct |
 | Balance map iteration (all token types, not just NIGHT) | Correct |
 | DApp connector API (17 methods, BigInt serialization, session TTL) | Correct |
 | `NIGHT_TOKEN_ID` hardcoding | Correct (equivalent to `ledger.unshieldedToken().raw`) |
+| Transfer signing (signs when keystore available, matching SDK examples) | Correct |
+| Dust registration (no additional balancing needed per SDK `designation.ts`) | Correct |
+| Address validation (Bech32m parse + type check + codec decode per type) | Correct |
+| Checkpoint lifecycle (save on sync, save on stop, try/catch restore) | Correct |
+| WebSocket lifecycle (wrapper tracks + force-close on stop) | Correct |
+| Connection-aware auto-unlock with mainnet fallback | Correct |
 
-### Bug found and fixed
+### Bugs found and fixed
 
-**`core/transfer.ts` — conditional signing on internal transfer path.** The internal UI transfer code originally only signed when `tokenType === 'unshielded'`, skipping signing for shielded transfers. **Fixed:** signing now runs whenever `unshieldedKeystore` is available, matching the DApp connector path and SDK examples.
+1. **`popup/pages/Onboarding.tsx` — `entropy.slice(0, 32)` on mnemonic conversion (3 locations).** `mnemonicToEntropy` for a 256-bit mnemonic already returns exactly 32 bytes. The `.slice(0, 32)` was a no-op but looked like intentional truncation of cryptographic material and would silently destroy key material if mnemonic strength ever changed. **Fixed:** use `new Uint8Array(entropy)` directly.
+
+2. **`core/dustDeregistration.ts` — missing `balanceUnprovenTransaction` step.** The SDK example (`deregistration.ts`) shows that `deregisterFromDustGeneration` returns a recipe whose `.transaction` must be balanced with `balanceUnprovenTransaction` using `tokenKindsToBalance: ['dust']` before finalizing. The wallet skipped this step, going straight from deregister to finalize. Without fee balancing, deregistration transactions would fail on-chain. **Fixed:** added the balancing step with dust fee balancing, matching the SDK example.
+
+3. **`core/transfer.ts` — conditional signing on internal transfer path (v0.1.0).** The internal UI transfer code originally only signed when `tokenType === 'unshielded'`, skipping signing for shielded transfers. **Fixed:** signing now runs whenever `unshieldedKeystore` is available, matching the DApp connector path and SDK examples.
+
+### Dead code removed
+
+- **`core/wallet.ts`** — unused initialization module with stale patterns (no key derivation retry, used `makeWasmProvingService` instead of `makeServerProvingService`, batch derivation without failure handling). All runtime wallet initialization goes through `walletManager.ts:initializeWalletCore`. Removed.
 
 ### Not implemented (documented in SDK)
 

@@ -37,7 +37,7 @@ export function Onboarding() {
     const mnemonic = generateMnemonic(wordlist, 256);
     const words = mnemonic.split(' ');
     const entropy = mnemonicToEntropy(mnemonic, wordlist);
-    return { words, seed: new Uint8Array(entropy.slice(0, 32)) };
+    return { words, seed: new Uint8Array(entropy) };
   }
 
   async function parseSeedInput(): Promise<Uint8Array> {
@@ -49,7 +49,7 @@ export function Onboarding() {
         throw new Error('Invalid mnemonic phrase');
       }
       const entropy = mnemonicToEntropy(trimmed, wordlist);
-      return new Uint8Array(entropy.slice(0, 32));
+      return new Uint8Array(entropy);
     }
     const hex = seedInput.trim().replace(/^0x/, '');
     if (!/^[0-9a-f]+$/i.test(hex) || (hex.length !== 64 && hex.length !== 128)) {
@@ -74,7 +74,7 @@ export function Onboarding() {
         const { mnemonicToEntropy } = await import('@scure/bip39');
         const { wordlist: wl } = await import('@scure/bip39/wordlists/english.js');
         const ent = mnemonicToEntropy(seedWords.join(' '), wl);
-        seed = new Uint8Array(ent.slice(0, 32));
+        seed = new Uint8Array(ent);
       } else {
         seed = await parseSeedInput();
       }

@@ -1,6 +1,6 @@
 {
   "name": "gsd-wallet",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "description": "GSD Wallet — Chrome extension for Midnight",
@@ -8,7 +8,11 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "localnet:up": "docker compose up -d --wait",
+    "localnet:down": "docker compose down",
+    "localnet:logs": "docker compose logs -f",
+    "localnet:reset": "docker compose down -v && docker compose up -d --wait"
   },
   "dependencies": {
     "@midnight-ntwrk/dapp-connector-api": "4.0.1",

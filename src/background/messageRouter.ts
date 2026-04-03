@@ -11,6 +11,17 @@ type SendResponse = (response: PopupResponse) => void;
 const connectedPorts: chrome.runtime.Port[] = [];
 const sessions = new Map<string, { origin: string; networkId: string; createdAt: number }>();
 
+// DApp methods that a production wallet would require user approval for.
+// In this dev wallet they are auto-approved — the BYPASS warning is emitted
+// so developers can see exactly when approval would have been requested.
+const SENSITIVE_METHODS = new Set([
+  'submitTransaction',
+  'balanceUnsealedTransaction',
+  'balanceSealedTransaction',
+  'makeTransfer',
+  'signData',
+]);
+
 function broadcastState(state: SerializedWalletState): void {
   const msg: PopupResponse = { type: 'STATE_UPDATE', state };
   for (const port of connectedPorts) {
@@ -180,6 +191,9 @@ async function handleDappRequest(
 
   if (payload['type'] === 'GSD_CONNECT') {
     await offscreenClient.waitForReady();
+    emit('warn', 'dapp', `BYPASS: auto-approved connection from ${origin} (production wallet would prompt user)`, {
+      origin, networkId: payload['networkId'],
+    });
     const sessionId = crypto.randomUUID();
     sessions.set(sessionId, {
       origin: origin ?? (payload['origin'] as string),
@@ -209,6 +223,12 @@ async function handleDappRequest(
         type: 'GSD_ERROR',
         error: { code: 'Forbidden', reason: 'Origin mismatch — session belongs to a different origin' },
       };
+    }
+
+    if (SENSITIVE_METHODS.has(method)) {
+      emit('warn', 'dapp', `BYPASS: auto-approved ${method} from ${origin} (production wallet would prompt user)`, {
+        origin, method, sessionId,
+      });
     }
 
     const apiResult = await offscreenClient.request('DAPP_API_CALL', { method, args }) as

@@ -105,14 +105,21 @@ Two-phase initialization ensures the UI is never blocked:
 
 ### Localnet
 
-1. Start local infrastructure (node + indexer + proof server)
-2. Select "Undeployed" environment
-3. Click W0 to import the genesis wallet with all minted NIGHT
-4. Deploy and test your contracts
+```bash
+npm run localnet:up    # starts node + indexer + proof server
+```
+
+Select "Undeployed" environment, click W0 to import the genesis wallet with all minted NIGHT, deploy and test your contracts.
+
+```bash
+npm run localnet:down  # stop all services
+npm run localnet:logs  # tail service logs
+npm run localnet:reset # nuke volumes and restart fresh
+```
 
 ### Testnet / Mainnet
 
-1. Start a proof server: `docker run -d -p 6300:6300 ghcr.io/midnight-ntwrk/proof-server:8.0.2 midnight-proof-server -v`
+1. Start a proof server: `docker run -d -p 6300:6300 ghcr.io/midnight-ntwrk/proof-server:8.0.3 midnight-proof-server -v`
 2. Select your target network
 3. Import your funded wallet seed
 4. Your dApp can discover the wallet via `window.midnight`
@@ -154,9 +161,13 @@ Intentional trade-offs for developer convenience:
 | Seed storage | Plaintext in IndexedDB — do not use for real funds |
 | Password protection | Disabled |
 | DApp connections | Auto-approved, no user confirmation |
+| Transaction signing | Auto-signed — `BYPASS:` warnings emitted to diagnostics |
+| Data signing | Auto-signed — `BYPASS:` warnings emitted to diagnostics |
 | CSP | `wasm-unsafe-eval` required for Midnight SDK WASM |
 
 Seed material is zeroed after use in the Worker. Wallet IDs are derived from SHA-256 of the seed (never raw seed bytes in logs or storage keys).
+
+All operations that a production wallet would prompt the user for (connection approval, transaction signing, data signing, transaction submission) emit `BYPASS:` warnings at `warn` level in the diagnostic stream. Filter diagnostics by "BYPASS" to see exactly when approval would have been requested.
 
 ## Known issues
 

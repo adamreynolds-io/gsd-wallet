@@ -31,6 +31,12 @@ import {
   clearCheckpoint,
 } from './sdkCheckpoint';
 import { importBundledCache } from './cacheImporter';
+import {
+  trackedWebSockets,
+  blocked,
+  blockNewConnections,
+  allowNewConnections,
+} from './wsTracker';
 
 export interface WalletSecretKeys {
   shieldedSecretKeys: ledger.ZswapSecretKeys;
@@ -56,6 +62,8 @@ interface ActiveWallet {
 let activeWallet: ActiveWallet | null = null;
 let stateListeners: Array<(state: SerializedWalletState) => void> = [];
 let initializingPromise: Promise<void> | null = null;
+let proverReachable = false;
+let proverProbeInterval: ReturnType<typeof setInterval> | null = null;
 
 export function getActiveWallet(): ActiveWallet | null {
   return activeWallet;
@@ -232,7 +240,7 @@ function serializeState(
     connections: {
       node: up.isConnected,
       indexer: sp.isConnected,
-      prover: true,
+      prover: proverReachable,
     },
     activeWalletName: activeWallet?.walletName ?? '',
   };
@@ -435,6 +443,9 @@ async function initializeWalletCore(
     provingServerUrl: string;
   },
 ): Promise<void> {
+  // Re-enable WebSocket connections (may have been blocked by stopWallet)
+  allowNewConnections();
+
   const t0 = Date.now();
   emit('info', 'wallet', `Initializing wallet`, { environment, accountIndex, walletName });
 
@@ -793,6 +804,8 @@ async function initializeWalletCore(
 
   // --- Phase 2: Start facade in background (slow, non-blocking) ---
 
+  startProverProbe(effectiveConfig.provingServerUrl);
+
   emit('info', 'wallet', 'Starting facade (connecting to indexer/node)');
   const startT0 = Date.now();
   const startPromise = facade.start(shieldedSecretKeys, dustSecretKey)
@@ -808,6 +821,7 @@ async function initializeWalletCore(
 export async function stopWallet(): Promise<void> {
   if (activeWallet) {
     emit('info', 'wallet', 'Stopping wallet');
+    stopProverProbe();
     activeWallet.subscription.unsubscribe();
     if (activeWallet.stallCheckInterval) {
       clearInterval(activeWallet.stallCheckInterval);
@@ -825,14 +839,90 @@ export async function stopWallet(): Promise<void> {
         error: String(e),
       });
     }
+
+    // Block new WebSocket connections before stopping to prevent the
+    // WsProvider reconnect loop from creating new sockets after close.
+    blockNewConnections();
+    forceCloseLeakedSockets();
+
     try {
-      await activeWallet.facade.stop();
+      await Promise.race([
+        activeWallet.facade.stop(),
+        new Promise<void>((resolve) => setTimeout(() => {
+          emit('warn', 'wallet', 'facade.stop() timed out after 3s');
+          resolve();
+        }, 3000)),
+      ]);
     } catch (e) {
       emit('warn', 'wallet', 'Facade stop error (ignored)', { error: String(e) });
     }
+
+    // Close any sockets created during the stop attempt
+    forceCloseLeakedSockets();
+
     activeWallet = null;
     emit('info', 'wallet', 'Wallet stopped');
   }
+}
+
+/**
+ * Force-closes any WebSocket connections that are still open.
+ * Catches the @polkadot/api WsProvider auto-reconnect loop which
+ * uses reconnectionTimeout: Duration.infinity and can outlive
+ * Effect scope finalization.
+ */
+function forceCloseLeakedSockets(): void {
+  emit('debug', 'wallet', `forceClose: ${trackedWebSockets.size} tracked, blocked=${blocked}`);
+  let closed = 0;
+  for (const ws of trackedWebSockets) {
+    if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+      ws.close();
+      closed++;
+    }
+  }
+  if (closed > 0) {
+    emit('debug', 'wallet', `Force-closed ${closed} leaked WebSocket(s)`);
+  }
+}
+
+const PROVER_PROBE_INTERVAL_MS = 30_000;
+const PROVER_PROBE_TIMEOUT_MS = 5_000;
+
+async function probeProver(url: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PROVER_PROBE_TIMEOUT_MS);
+    const response = await fetch(url, {
+      method: 'HEAD',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    // Any HTTP response (even 4xx/405) means the server is up
+    return response.status < 500;
+  } catch {
+    return false;
+  }
+}
+
+function startProverProbe(provingServerUrl: string): void {
+  stopProverProbe();
+  const run = async () => {
+    const was = proverReachable;
+    proverReachable = await probeProver(provingServerUrl);
+    if (proverReachable !== was) {
+      emit('info', 'wallet', `Prover ${proverReachable ? 'reachable' : 'unreachable'}`, { url: provingServerUrl });
+    }
+  };
+  void run();
+  proverProbeInterval = setInterval(run, PROVER_PROBE_INTERVAL_MS);
+}
+
+function stopProverProbe(): void {
+  if (proverProbeInterval) {
+    clearInterval(proverProbeInterval);
+    proverProbeInterval = null;
+  }
+  proverReachable = false;
 }
 
 export function getLatestSerializedState(): SerializedWalletState | null {
