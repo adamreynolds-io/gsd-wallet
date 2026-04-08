@@ -63,6 +63,8 @@ export function setupMessageRouter(): void {
     }
     if (broadcast.type === 'SOCKET_STATE_CHANGE') {
       const { state, sessionId } = broadcast.payload as { state: SocketState; sessionId?: string };
+      // Persist so popup picks it up on reopen
+      chrome.storage.session.set({ gsdSocketState: state });
       const msg: PopupResponse = { type: 'CONNECT_STATUS', state, ...(sessionId !== undefined ? { sessionId } : {}) };
       for (const port of connectedPorts) {
         try { port.postMessage(msg); } catch { /* */ }

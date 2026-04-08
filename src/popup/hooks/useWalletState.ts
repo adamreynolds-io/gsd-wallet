@@ -93,7 +93,7 @@ export function useWalletConnection(): void {
     );
 
     // Read cached state and diagnostic events from session storage
-    chrome.storage.session.get(['gsdEnvironment', 'gsdLastState', 'gsdDiagnosticEvents']).then((result) => {
+    chrome.storage.session.get(['gsdEnvironment', 'gsdLastState', 'gsdDiagnosticEvents', 'gsdSocketState']).then((result) => {
       const store = usePopupStore.getState();
       if (result['gsdLastState'] && !store.walletState) {
         store.setWalletState(result['gsdLastState'] as SerializedWalletState);
@@ -106,6 +106,10 @@ export function useWalletConnection(): void {
       const cachedEvents = result['gsdDiagnosticEvents'] as import('@shared/types').DiagnosticEvent[] | undefined;
       if (cachedEvents?.length) {
         store.addDiagnosticEventsBatch(cachedEvents);
+      }
+      const cachedSocketState = result['gsdSocketState'] as import('@shared/types').SocketState | undefined;
+      if (cachedSocketState) {
+        store.setSocketState(cachedSocketState);
       }
     });
 
@@ -123,6 +127,10 @@ export function useWalletConnection(): void {
       if (changes['gsdDiagnosticEvents']?.newValue) {
         const store = usePopupStore.getState();
         store.addDiagnosticEventsBatch(changes['gsdDiagnosticEvents'].newValue as import('@shared/types').DiagnosticEvent[]);
+      }
+      if (changes['gsdSocketState']?.newValue) {
+        const store = usePopupStore.getState();
+        store.setSocketState(changes['gsdSocketState'].newValue as import('@shared/types').SocketState);
       }
     };
     chrome.storage.onChanged.addListener(storageListener);

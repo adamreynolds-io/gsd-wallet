@@ -5,7 +5,7 @@ import type { DiagnosticEvent, DiagnosticLevel, SerializedWalletState, SocketSta
 
 const DEFAULT_URL = 'ws://127.0.0.1:6372';
 const BASE_BACKOFF_MS = 1_000;
-const MAX_BACKOFF_MS = 30_000;
+const MAX_BACKOFF_MS = 5_000;
 
 function emitConnect(
   level: DiagnosticLevel,
