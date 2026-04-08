@@ -22,6 +22,8 @@ function handleMessage(msg: PopupResponse): void {
       releaseUrl: msg.releaseUrl,
       downloadUrl: msg.downloadUrl,
     });
+  } else if (msg.type === 'CONNECT_STATUS') {
+    store.setSocketState(msg.state);
   }
 }
 
@@ -73,6 +75,7 @@ export function useWalletConnection(): void {
 
       port.postMessage({ type: 'GET_STATE' });
       port.postMessage({ type: 'GET_DIAGNOSTIC_BACKLOG' });
+      port.postMessage({ type: 'GET_CONNECT_STATUS' });
     }
 
     // Check if wallets exist

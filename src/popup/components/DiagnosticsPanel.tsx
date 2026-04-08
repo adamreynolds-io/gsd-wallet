@@ -4,6 +4,7 @@ import type {
   DiagnosticEvent,
   DiagnosticLevel,
   DiagnosticCategory,
+  InspectorTarget,
 } from '@shared/types';
 import { DIAGNOSTIC_LEVELS, DIAGNOSTIC_CATEGORIES } from '@shared/types';
 
@@ -34,6 +35,7 @@ const CATEGORY_COLORS: Record<DiagnosticCategory, string> = {
   indexer: 'text-teal-400',
   storage: 'text-gray-500',
   error: 'text-red-400',
+  connect: 'text-lime-400',
 };
 
 const LEVEL_LABELS: Record<DiagnosticLevel, string> = {
@@ -50,7 +52,7 @@ const LEVEL_TOOLTIPS: Record<DiagnosticLevel, string> = {
 const CATEGORY_SHORT: Record<DiagnosticCategory, string> = {
   sw: 'SW', wallet: 'Wal', state: 'Sta', sync: 'Sync', sdk: 'SDK',
   dapp: 'DApp', api: 'API', popup: 'Pop', tx: 'Tx',
-  indexer: 'Idx', storage: 'Sto', error: 'Err',
+  indexer: 'Idx', storage: 'Sto', error: 'Err', connect: 'Conn',
 };
 
 const CATEGORY_TOOLTIPS: Record<DiagnosticCategory, string> = {
@@ -66,9 +68,14 @@ const CATEGORY_TOOLTIPS: Record<DiagnosticCategory, string> = {
   indexer: 'GraphQL indexer queries',
   storage: 'IndexedDB operations',
   error: 'Errors at any layer',
+  connect: 'GSD Connect — trace events from external dApp or test harness',
 };
 
-export function DiagnosticsPanel() {
+interface DiagnosticsPanelProps {
+  onInspect?: (target: InspectorTarget) => void;
+}
+
+export function DiagnosticsPanel({ onInspect }: DiagnosticsPanelProps) {
   const events = usePopupStore((s) => s.diagnosticEvents);
   const levelFilter = usePopupStore((s) => s.diagnosticLevelFilter);
   const categoryFilter = usePopupStore((s) => s.diagnosticCategoryFilter);
@@ -182,7 +189,12 @@ export function DiagnosticsPanel() {
             </div>
           ) : (
             filtered.map((event) => (
-              <EventRow key={event.id} event={event} expandCollapseSignal={expandCollapseSignal} />
+              <EventRow
+                key={event.id}
+                event={event}
+                expandCollapseSignal={expandCollapseSignal}
+                {...(onInspect !== undefined ? { onInspect } : {})}
+              />
             ))
           )}
         </div>
@@ -199,7 +211,11 @@ export function DiagnosticsPanel() {
   );
 }
 
-function EventRow({ event, expandCollapseSignal }: { event: DiagnosticEvent; expandCollapseSignal: { action: 'expand' | 'collapse'; tick: number } }) {
+function EventRow({ event, expandCollapseSignal, onInspect }: {
+  event: DiagnosticEvent;
+  expandCollapseSignal: { action: 'expand' | 'collapse'; tick: number };
+  onInspect?: (target: InspectorTarget) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
@@ -216,6 +232,8 @@ function EventRow({ event, expandCollapseSignal }: { event: DiagnosticEvent; exp
   }, [event]);
 
   const hasData = event.data !== undefined;
+
+  const links = extractLinks(event.data, onInspect);
 
   return (
     <div className="border-b border-midnight-800 hover:bg-midnight-800/50">
@@ -251,18 +269,137 @@ function EventRow({ event, expandCollapseSignal }: { event: DiagnosticEvent; exp
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
         </button>
       </div>
+      {links.length > 0 && (
+        <div className="flex flex-wrap gap-1 px-2 pb-0.5 pl-[88px]">
+          {links.map((tag, i) => (
+            <button
+              key={i}
+              onClick={(e) => { e.stopPropagation(); tag.action(); }}
+              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent-purple/20 text-accent-purple hover:bg-accent-purple/40 hover:text-white"
+              title={`Open ${tag.title} in Explorer`}
+            >
+              {tag.label}
+            </button>
+          ))}
+        </div>
+      )}
 
 
 
       {expanded && hasData && (
         <div className="px-2 pb-1">
-          <pre className="text-xs text-gray-400 font-mono bg-midnight-900 rounded p-1.5 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all">
-            {JSON.stringify(event.data, null, 2)}
-          </pre>
+          <div className="text-xs text-gray-400 font-mono bg-midnight-900 rounded p-1.5 overflow-x-auto max-h-[200px] overflow-y-auto">
+            <DataRenderer data={event.data} {...(onInspect !== undefined ? { onInspect } : {})} />
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+const HEX64_RE = /^[0-9a-f]{64}$/;
+
+function isBlockKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  return lower.includes('block') && (lower.includes('height') || lower.endsWith('block'));
+}
+
+function isContractKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  return lower.includes('contract') || lower.includes('address');
+}
+
+function ValueRenderer({ keyName, value, onInspect }: {
+  keyName: string;
+  value: unknown;
+  onInspect?: (target: InspectorTarget) => void;
+}) {
+  if (typeof value === 'string' && HEX64_RE.test(value) && onInspect) {
+    const target: InspectorTarget = isContractKey(keyName)
+      ? { kind: 'contract', address: value }
+      : { kind: 'transaction', hash: value };
+    const label = keyName.toLowerCase().includes('contract') ? 'contract' : 'tx';
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); onInspect(target); }}
+        className="text-accent-purple hover:text-accent-magenta underline decoration-dotted cursor-pointer break-all text-left"
+        title={`Open ${label} in Explorer`}
+      >
+        {value}
+      </button>
+    );
+  }
+
+  if (typeof value === 'number' && isBlockKey(keyName) && onInspect) {
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); onInspect({ kind: 'block', height: value }); }}
+        className="text-accent-purple hover:text-accent-magenta underline decoration-dotted cursor-pointer"
+        title="Open block in Explorer"
+      >
+        {value}
+      </button>
+    );
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    return <span className="break-all whitespace-pre-wrap">{JSON.stringify(value, null, 2)}</span>;
+  }
+
+  return <span className="break-all">{JSON.stringify(value)}</span>;
+}
+
+function DataRenderer({ data, onInspect }: { data: unknown; onInspect?: (target: InspectorTarget) => void }) {
+  if (typeof data !== 'object' || data === null) {
+    return <span>{JSON.stringify(data)}</span>;
+  }
+
+  const entries = Object.entries(data as Record<string, unknown>);
+
+  return (
+    <div className="space-y-0.5">
+      {entries.map(([key, value]) => (
+        <div key={key} className="flex gap-1">
+          <span className="text-gray-500 shrink-0">{key}:</span>
+          <ValueRenderer keyName={key} value={value} {...(onInspect !== undefined ? { onInspect } : {})} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function truncHex(hex: string): string {
+  return hex.length > 16 ? `${hex.slice(0, 8)}..${hex.slice(-6)}` : hex;
+}
+
+interface LinkTag {
+  label: string;
+  title: string;
+  action: () => void;
+}
+
+function extractLinks(data: unknown, onInspect?: (target: InspectorTarget) => void): LinkTag[] {
+  if (!onInspect || !data || typeof data !== 'object') return [];
+  const obj = data as Record<string, unknown>;
+  const tags: LinkTag[] = [];
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'string' && HEX64_RE.test(value)) {
+      if (isContractKey(key)) {
+        const addr = value;
+        tags.push({ label: `contract:${truncHex(value)}`, title: value, action: () => onInspect({ kind: 'contract', address: addr }) });
+      } else {
+        const hash = value;
+        tags.push({ label: `tx:${truncHex(value)}`, title: value, action: () => onInspect({ kind: 'transaction', hash }) });
+      }
+    }
+    if (typeof value === 'number' && isBlockKey(key)) {
+      const height = value;
+      tags.push({ label: `block:${height}`, title: `Block ${height}`, action: () => onInspect({ kind: 'block', height }) });
+    }
+  }
+
+  return tags;
 }
 
 const ICONS = {

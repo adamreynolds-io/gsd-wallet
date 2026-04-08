@@ -27,17 +27,20 @@ import { executeTransfer } from '@core/transfer';
 import { executeDustRegistration } from '@core/dustRegistration';
 import { executeDustDeregistration } from '@core/dustDeregistration';
 import * as walletManager from './walletManager';
+import * as connectClient from './connectClient';
 import type { TransferRequest } from '@shared/messages';
 import type { TransactionResult } from '@shared/types';
 
-// Wire diagnostic events to postMessage to main thread
+// Wire diagnostic events to postMessage to main thread and GSD Connect
 setBroadcastFn((event) => {
   self.postMessage({ id: null, type: 'DIAGNOSTIC_EVENT', payload: event });
+  connectClient.forwardEvent(event);
 });
 
-// Wire wallet state changes to postMessage to main thread
+// Wire wallet state changes to postMessage to main thread and GSD Connect
 walletManager.onStateChange((state) => {
   self.postMessage({ id: null, type: 'STATE_UPDATE', payload: state });
+  connectClient.forwardStateUpdate(state);
 });
 
 function sendResponse(id: string, payload: unknown): void {
@@ -130,6 +133,29 @@ async function handleRequest(msg: { id: string; type: string; payload: unknown }
         if (!env) { sendError(id, 'No active wallet'); break; }
         const ndjson = await exportCacheAsNdjson(env);
         sendResponse(id, ndjson);
+        break;
+      }
+
+      case 'SET_CONNECT_URL': {
+        const url = (data['url'] as string) || '';
+        if (url) {
+          connectClient.connect(url);
+        } else {
+          connectClient.disconnect();
+        }
+        sendResponse(id, { success: true });
+        break;
+      }
+
+      case 'GET_CONNECT_STATUS':
+      case 'GET_SOCKET_STATE': {
+        sendResponse(id, { state: connectClient.getState(), sessionId: connectClient.getSessionId() });
+        break;
+      }
+
+      case 'END_SOCKET_SESSION': {
+        connectClient.endSession('disconnected-by-user');
+        sendResponse(id, { success: true });
         break;
       }
 

@@ -149,6 +149,10 @@ export type InspectorTarget =
   | { kind: 'block'; height: number }
   | { kind: 'contract'; address: string };
 
+// --- Socket ---
+
+export type SocketState = 'off' | 'waiting' | 'active';
+
 // --- Diagnostics ---
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -165,12 +169,13 @@ export type DiagnosticCategory =
   | 'tx'
   | 'indexer'
   | 'storage'
-  | 'error';
+  | 'error'
+  | 'connect';
 
 export const DIAGNOSTIC_LEVELS: readonly DiagnosticLevel[] = ['debug', 'info', 'warn', 'error'];
 
 export const DIAGNOSTIC_CATEGORIES: readonly DiagnosticCategory[] = [
-  'sw', 'wallet', 'state', 'sync', 'sdk', 'dapp', 'api', 'popup', 'tx', 'indexer', 'storage', 'error',
+  'sw', 'wallet', 'state', 'sync', 'sdk', 'dapp', 'api', 'popup', 'tx', 'indexer', 'storage', 'error', 'connect',
 ];
 
 export interface DiagnosticEvent {

@@ -1,5 +1,5 @@
-import type { PopupRequest, PopupResponse } from '@shared/messages';
-import type { DiagnosticEvent, SerializedWalletState, TransactionResult, TxHistoryEntry } from '@shared/types';
+import type { ConnectEventPayload, PopupRequest, PopupResponse } from '@shared/messages';
+import type { DiagnosticEvent, SerializedWalletState, SocketState, TransactionResult, TxHistoryEntry } from '@shared/types';
 import { getCachedUpdate } from './updateChecker';
 import * as stateManager from './stateManager';
 import * as offscreenClient from './offscreenClient';
@@ -47,6 +47,23 @@ export function setupMessageRouter(): void {
         type: 'DIAGNOSTIC_EVENT',
         event: broadcast.payload as DiagnosticEvent,
       };
+      for (const port of connectedPorts) {
+        try { port.postMessage(msg); } catch { /* */ }
+      }
+    }
+    if (broadcast.type === 'CONNECT_EVENT') {
+      const payload = broadcast.payload as ConnectEventPayload;
+      emit(
+        payload.level,
+        'connect',
+        payload.message,
+        { ...((payload.data && typeof payload.data === 'object') ? payload.data : { data: payload.data }), source: 'gsd-connect' },
+        payload.elapsed,
+      );
+    }
+    if (broadcast.type === 'SOCKET_STATE_CHANGE') {
+      const { state, sessionId } = broadcast.payload as { state: SocketState; sessionId?: string };
+      const msg: PopupResponse = { type: 'CONNECT_STATUS', state, ...(sessionId !== undefined ? { sessionId } : {}) };
       for (const port of connectedPorts) {
         try { port.postMessage(msg); } catch { /* */ }
       }
@@ -128,8 +145,13 @@ export function setupMessageRouter(): void {
         });
 
         handleDappRequest(payload, origin).then((response) => {
-          emit('debug', 'dapp', `dApp response: ${requestId}`, {
-            requestId, responseType: (response as Record<string, unknown>)?.['type'],
+          const resp = response as Record<string, unknown>;
+          const responseType = resp?.['type'] as string | undefined;
+          const isError = responseType === 'GSD_ERROR';
+          const errorDetail = isError ? resp['error'] as Record<string, unknown> | undefined : undefined;
+          emit(isError ? 'error' : 'debug', 'dapp', `dApp response: ${requestId}`, {
+            requestId, responseType,
+            ...(errorDetail ? { errorCode: errorDetail['code'], errorReason: errorDetail['reason'] } : {}),
           });
           try {
             port.postMessage({ requestId, payload: response });
@@ -320,6 +342,7 @@ async function handlePopupMessage(
 
       case 'SWITCH_WALLET': {
         try {
+          await offscreenClient.request('END_SOCKET_SESSION', null).catch(() => { /* no session */ });
           const seed = await stateManager.switchWallet(msg.index);
           const info = await stateManager.getActiveWalletInfo();
           if (info) {
@@ -341,6 +364,7 @@ async function handlePopupMessage(
       }
 
       case 'SWITCH_ENVIRONMENT': {
+        await offscreenClient.request('END_SOCKET_SESSION', null).catch(() => { /* no session */ });
         // Invalidate all dApp sessions — they hold the old networkId
         const sessionCount = sessions.size;
         sessions.clear();
@@ -449,6 +473,42 @@ async function handlePopupMessage(
       case 'EXPORT_CACHE': {
         const ndjson = await offscreenClient.request('EXPORT_CACHE', null) as string;
         send({ type: 'EXPORT_CACHE_RESULT', data: ndjson });
+        break;
+      }
+
+      case 'SET_CONNECT_URL': {
+        const connectUrl = msg.url;
+        await chrome.storage.local.set({
+          gsdSocketConfig: { url: connectUrl, enabled: !!connectUrl },
+        });
+        await offscreenClient.request('SET_CONNECT_URL', { url: connectUrl });
+        const socketResult = await offscreenClient.request('GET_SOCKET_STATE', null) as { state: SocketState; sessionId?: string };
+        const { state, sessionId } = socketResult;
+        emit('info', 'connect', state !== 'off' ? `Socket enabled (waiting) — ${connectUrl}` : 'Socket disabled');
+        const statusMsg: PopupResponse = { type: 'CONNECT_STATUS', state, ...(sessionId !== undefined ? { sessionId } : {}) };
+        send(statusMsg);
+        for (const p of connectedPorts) {
+          try { p.postMessage(statusMsg); } catch { /* */ }
+        }
+        break;
+      }
+
+      case 'END_SOCKET_SESSION': {
+        await offscreenClient.request('END_SOCKET_SESSION', null);
+        const endResult = await offscreenClient.request('GET_SOCKET_STATE', null) as { state: SocketState; sessionId?: string };
+        emit('info', 'connect', 'Session ended by user');
+        const endMsg: PopupResponse = { type: 'CONNECT_STATUS', state: endResult.state, ...(endResult.sessionId !== undefined ? { sessionId: endResult.sessionId } : {}) };
+        send(endMsg);
+        for (const p of connectedPorts) {
+          try { p.postMessage(endMsg); } catch { /* */ }
+        }
+        break;
+      }
+
+      case 'GET_CONNECT_STATUS': {
+        const socketStatus = await offscreenClient.request('GET_SOCKET_STATE', null) as { state: SocketState; sessionId?: string };
+        const { state: currentState, sessionId: currentSessionId } = socketStatus;
+        send({ type: 'CONNECT_STATUS', state: currentState, ...(currentSessionId !== undefined ? { sessionId: currentSessionId } : {}) });
         break;
       }
 

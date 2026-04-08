@@ -2,14 +2,16 @@ import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePopupStore } from '@popup/store/popupStore';
 import { getEnvironmentLabel } from '@shared/environments';
-import type { SerializedWalletState } from '@shared/types';
+import type { SerializedWalletState, SocketState } from '@shared/types';
 import { WalletMenu } from './WalletMenu';
+import { useSocketToggle } from '@popup/hooks/useSocketToggle';
 
 export function Header() {
   const navigate = useNavigate();
   const status = usePopupStore((s) => s.status);
   const walletState = usePopupStore((s) => s.walletState);
   const environment = usePopupStore((s) => s.environment);
+  const socketState = usePopupStore((s) => s.socketState);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuContainerRef = useRef<HTMLDivElement>(null);
 
@@ -23,14 +25,7 @@ export function Header() {
     <>
     <header className="flex items-center justify-between px-4 py-2 bg-midnight-800 border-b border-midnight-500 shrink-0">
       <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5">
-          <svg width="12" height="20" viewBox="0 0 230 406" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Shielded Technologies">
-            <title>Personal project by Adam Reynolds, Engineering Manager, Platform &amp; Tooling @ Shielded Technologies</title>
-            <path d="M92.0992 119.478V262.61L0 214.288V71.1553L137.901 0L230 48.3223L92.0992 119.478Z" fill="#FF4933"/>
-            <path d="M230 191.45V334.647L92.0992 405.802L0 357.416L137.901 286.324V143.128L230 191.45Z" fill="#FF4933"/>
-          </svg>
-          <h1 className="text-lg font-bold text-white tracking-wide">G.S.D. Wallet</h1>
-        </div>
+        <h1 className="text-lg font-bold text-white tracking-wide">G.S.D. Wallet</h1>
         {isActive && (
           <>
             <div className="relative" ref={menuContainerRef}>
@@ -58,6 +53,7 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-1.5">
+        <SocketToggle socketState={socketState} />
         <a
           href="https://github.com/adamreynolds-io/gsd-wallet"
           target="_blank"
@@ -175,6 +171,42 @@ function ChevronDownIcon() {
   return (
     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function SocketToggle({ socketState }: { socketState: SocketState }) {
+  const { toggle } = useSocketToggle();
+
+  const colorClass =
+    socketState === 'active' ? 'text-lime-400 hover:bg-midnight-600' :
+    socketState === 'waiting' ? 'text-amber-400 animate-pulse' :
+    'text-gray-500 hover:bg-midnight-600 hover:text-gray-300';
+
+  const title =
+    socketState === 'active' ? 'Session active — click to end session' :
+    socketState === 'waiting' ? 'Waiting for connection — click to disable' :
+    'Socket off — click to enable';
+
+  return (
+    <button
+      onClick={() => toggle()}
+      className={`p-1.5 rounded transition-colors ${colorClass}`}
+      title={title}
+    >
+      <SocketIcon />
+    </button>
+  );
+}
+
+function SocketIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22v-4" />
+      <path d="M7 12V6a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v6" />
+      <path d="M9 2v3" />
+      <path d="M15 2v3" />
+      <rect x="5" y="12" width="14" height="4" rx="1" />
     </svg>
   );
 }

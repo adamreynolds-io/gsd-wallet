@@ -190,7 +190,7 @@ async function handleApiCallInner(
       const txHashStr = String(submittedTxId ?? '');
       callContext['txHash'] = txHashStr;
       emit('info', 'tx', 'submitTransaction: submitted', { txHash: txHashStr }, Date.now() - submitT0);
-      return ok(undefined);
+      return ok(txHashStr);
     }
 
     case 'balanceUnsealedTransaction': {
@@ -225,7 +225,9 @@ async function handleApiCallInner(
         }
 
         emit('debug', 'tx', 'balanceUnsealed: tx info', txInfo);
-      } catch { /* */ }
+      } catch (e) {
+        emit('debug', 'tx', 'balanceUnsealed: tx info extraction failed', { error: String(e) });
+      }
 
       emit('info', 'tx', 'balanceUnsealed: balancing');
       await yieldToEventLoop();
