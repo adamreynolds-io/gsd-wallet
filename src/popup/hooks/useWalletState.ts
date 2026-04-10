@@ -22,6 +22,8 @@ function handleMessage(msg: PopupResponse): void {
       releaseUrl: msg.releaseUrl,
       downloadUrl: msg.downloadUrl,
     });
+  } else if (msg.type === 'CONNECT_STATUS') {
+    store.setSocketState(msg.state);
   }
 }
 
@@ -73,6 +75,7 @@ export function useWalletConnection(): void {
 
       port.postMessage({ type: 'GET_STATE' });
       port.postMessage({ type: 'GET_DIAGNOSTIC_BACKLOG' });
+      port.postMessage({ type: 'GET_CONNECT_STATUS' });
     }
 
     // Check if wallets exist
@@ -89,8 +92,8 @@ export function useWalletConnection(): void {
       },
     );
 
-    // Read cached state and diagnostic events from session storage
-    chrome.storage.session.get(['gsdEnvironment', 'gsdLastState', 'gsdDiagnosticEvents']).then((result) => {
+    // Read cached session state (wallet, socket, environment)
+    chrome.storage.session.get(['gsdEnvironment', 'gsdLastState', 'gsdSocketState']).then((result) => {
       const store = usePopupStore.getState();
       if (result['gsdLastState'] && !store.walletState) {
         store.setWalletState(result['gsdLastState'] as SerializedWalletState);
@@ -100,26 +103,41 @@ export function useWalletConnection(): void {
       } else if (result['gsdEnvironment']) {
         store.setEnvironment(result['gsdEnvironment'] as import('@shared/types').Environment);
       }
+      const cachedSocketState = result['gsdSocketState'] as import('@shared/types').SocketState | undefined;
+      if (cachedSocketState) {
+        store.setSocketState(cachedSocketState);
+      }
+    });
+
+    // Read diagnostic events from local storage (persists across extension reloads)
+    chrome.storage.local.get('gsdDiagnosticEvents').then((result) => {
       const cachedEvents = result['gsdDiagnosticEvents'] as import('@shared/types').DiagnosticEvent[] | undefined;
       if (cachedEvents?.length) {
-        store.addDiagnosticEventsBatch(cachedEvents);
+        usePopupStore.getState().addDiagnosticEventsBatch(cachedEvents);
       }
     });
 
     // Live state updates via storage change listener — works regardless of port state
     const storageListener = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
-      if (area !== 'session') return;
-      if (changes['gsdLastState']?.newValue) {
-        const state = changes['gsdLastState'].newValue as SerializedWalletState;
-        const store = usePopupStore.getState();
-        if (store.hasVault !== false) {
-          if (store.hasVault === null) store.setHasVault(true);
-          store.setWalletState(state);
+      if (area === 'session') {
+        if (changes['gsdLastState']?.newValue) {
+          const state = changes['gsdLastState'].newValue as SerializedWalletState;
+          const store = usePopupStore.getState();
+          if (store.hasVault !== false) {
+            if (store.hasVault === null) store.setHasVault(true);
+            store.setWalletState(state);
+          }
+        }
+        if (changes['gsdSocketState']?.newValue) {
+          const store = usePopupStore.getState();
+          store.setSocketState(changes['gsdSocketState'].newValue as import('@shared/types').SocketState);
         }
       }
-      if (changes['gsdDiagnosticEvents']?.newValue) {
-        const store = usePopupStore.getState();
-        store.addDiagnosticEventsBatch(changes['gsdDiagnosticEvents'].newValue as import('@shared/types').DiagnosticEvent[]);
+      if (area === 'local') {
+        if (changes['gsdDiagnosticEvents']?.newValue) {
+          const store = usePopupStore.getState();
+          store.addDiagnosticEventsBatch(changes['gsdDiagnosticEvents'].newValue as import('@shared/types').DiagnosticEvent[]);
+        }
       }
     };
     chrome.storage.onChanged.addListener(storageListener);

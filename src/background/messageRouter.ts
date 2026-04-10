@@ -1,5 +1,5 @@
-import type { PopupRequest, PopupResponse } from '@shared/messages';
-import type { DiagnosticEvent, SerializedWalletState, TransactionResult, TxHistoryEntry } from '@shared/types';
+import type { ConnectEventPayload, PopupRequest, PopupResponse } from '@shared/messages';
+import type { DiagnosticEvent, SerializedWalletState, SocketState, TransactionResult, TxHistoryEntry } from '@shared/types';
 import { getCachedUpdate } from './updateChecker';
 import * as stateManager from './stateManager';
 import * as offscreenClient from './offscreenClient';
@@ -50,6 +50,67 @@ export function setupMessageRouter(): void {
       for (const port of connectedPorts) {
         try { port.postMessage(msg); } catch { /* */ }
       }
+    }
+    if (broadcast.type === 'CONNECT_EVENT') {
+      const payload = broadcast.payload as ConnectEventPayload;
+      emit(
+        payload.level,
+        'connect',
+        payload.message,
+        { ...((payload.data && typeof payload.data === 'object') ? payload.data : { data: payload.data }), source: 'gsd-connect' },
+        payload.elapsed,
+      );
+    }
+    if (broadcast.type === 'SOCKET_STATE_CHANGE') {
+      const { state, sessionId } = broadcast.payload as { state: SocketState; sessionId?: string };
+      // Persist so popup picks it up on reopen
+      chrome.storage.session.set({ gsdSocketState: state }).catch(() => { /* best-effort persist */ });
+      const msg: PopupResponse = { type: 'CONNECT_STATUS', state, ...(sessionId !== undefined ? { sessionId } : {}) };
+      for (const port of connectedPorts) {
+        try { port.postMessage(msg); } catch { /* */ }
+      }
+    }
+    if (broadcast.type === 'SOCKET_DAPP_REQUEST') {
+      const { socketRequestId, dappPayload, origin } = broadcast.payload as {
+        socketRequestId: string;
+        dappPayload: Record<string, unknown>;
+        origin: string;
+      };
+
+      if (dappPayload['type'] === 'GSD_DISCONNECT') {
+        const sessionId = dappPayload['sessionId'] as string;
+        if (sessions.has(sessionId)) {
+          sessions.delete(sessionId);
+          emit('info', 'dapp', `Socket session removed`, { sessionId, origin });
+        }
+        return;
+      }
+
+      handleDappRequest(dappPayload, origin)
+        .then((response) => {
+          let sessionId: string | undefined;
+          const resp = response as Record<string, unknown>;
+          if (dappPayload['type'] === 'GSD_CONNECT' && resp?.['type'] === 'GSD_RESPONSE') {
+            sessionId = resp['result'] as string;
+          }
+          return offscreenClient.request('SOCKET_DAPP_RESPONSE', {
+            socketRequestId,
+            response,
+            sessionId,
+          });
+        })
+        .catch((e) => {
+          emit('error', 'error', `Socket dApp request failed`, {
+            socketRequestId, error: String(e),
+          });
+          offscreenClient.request('SOCKET_DAPP_RESPONSE', {
+            socketRequestId,
+            response: {
+              type: 'GSD_ERROR',
+              error: { code: 'InternalError', reason: String(e) },
+            },
+          }).catch(() => { /* delivery failed */ });
+        });
     }
   });
 
@@ -128,8 +189,13 @@ export function setupMessageRouter(): void {
         });
 
         handleDappRequest(payload, origin).then((response) => {
-          emit('debug', 'dapp', `dApp response: ${requestId}`, {
-            requestId, responseType: (response as Record<string, unknown>)?.['type'],
+          const resp = response as Record<string, unknown>;
+          const responseType = resp?.['type'] as string | undefined;
+          const isError = responseType === 'GSD_ERROR';
+          const errorDetail = isError ? resp['error'] as Record<string, unknown> | undefined : undefined;
+          emit(isError ? 'error' : 'debug', 'dapp', `dApp response: ${requestId}`, {
+            requestId, responseType,
+            ...(errorDetail ? { errorCode: errorDetail['code'], errorReason: errorDetail['reason'] } : {}),
           });
           try {
             port.postMessage({ requestId, payload: response });
@@ -320,6 +386,12 @@ async function handlePopupMessage(
 
       case 'SWITCH_WALLET': {
         try {
+          await offscreenClient.request('END_SOCKET_SESSION', null).catch(() => { /* no session */ });
+          const walletSessionCount = sessions.size;
+          sessions.clear();
+          if (walletSessionCount > 0) {
+            emit('info', 'dapp', `Cleared ${walletSessionCount} dApp sessions on wallet switch`);
+          }
           const seed = await stateManager.switchWallet(msg.index);
           const info = await stateManager.getActiveWalletInfo();
           if (info) {
@@ -341,6 +413,7 @@ async function handlePopupMessage(
       }
 
       case 'SWITCH_ENVIRONMENT': {
+        await offscreenClient.request('END_SOCKET_SESSION', null).catch(() => { /* no session */ });
         // Invalidate all dApp sessions — they hold the old networkId
         const sessionCount = sessions.size;
         sessions.clear();
@@ -452,10 +525,47 @@ async function handlePopupMessage(
         break;
       }
 
+      case 'SET_CONNECT_URL': {
+        const connectUrl = msg.url;
+        await chrome.storage.local.set({
+          gsdSocketConfig: { url: connectUrl, enabled: !!connectUrl },
+        });
+        await offscreenClient.request('SET_CONNECT_URL', { url: connectUrl });
+        const socketResult = await offscreenClient.request('GET_SOCKET_STATE', null) as { state: SocketState; sessionId?: string };
+        const { state, sessionId } = socketResult;
+        emit('info', 'connect', state !== 'off' ? `Socket enabled (waiting) — ${connectUrl}` : 'Socket disabled');
+        const statusMsg: PopupResponse = { type: 'CONNECT_STATUS', state, ...(sessionId !== undefined ? { sessionId } : {}) };
+        send(statusMsg);
+        for (const p of connectedPorts) {
+          try { p.postMessage(statusMsg); } catch { /* */ }
+        }
+        break;
+      }
+
+      case 'END_SOCKET_SESSION': {
+        await offscreenClient.request('END_SOCKET_SESSION', null);
+        const endResult = await offscreenClient.request('GET_SOCKET_STATE', null) as { state: SocketState; sessionId?: string };
+        emit('info', 'connect', 'Session ended by user');
+        const endMsg: PopupResponse = { type: 'CONNECT_STATUS', state: endResult.state, ...(endResult.sessionId !== undefined ? { sessionId: endResult.sessionId } : {}) };
+        send(endMsg);
+        for (const p of connectedPorts) {
+          try { p.postMessage(endMsg); } catch { /* */ }
+        }
+        break;
+      }
+
+      case 'GET_CONNECT_STATUS': {
+        const socketStatus = await offscreenClient.request('GET_SOCKET_STATE', null) as { state: SocketState; sessionId?: string };
+        const { state: currentState, sessionId: currentSessionId } = socketStatus;
+        send({ type: 'CONNECT_STATUS', state: currentState, ...(currentSessionId !== undefined ? { sessionId: currentSessionId } : {}) });
+        break;
+      }
+
       case 'CLEAR_ALL': {
         await offscreenClient.request('STOP_WALLET', null);
         await stateManager.clearAll();
-        chrome.storage.session.remove(['gsdLastState', 'gsdDiagnosticEvents']);
+        chrome.storage.session.remove(['gsdLastState']);
+        chrome.storage.local.remove(['gsdDiagnosticEvents']);
         break;
       }
 

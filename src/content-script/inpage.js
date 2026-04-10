@@ -9,18 +9,35 @@ const CONTENT_SOURCE = 'gsd-wallet-content';
 
 let requestCounter = 0;
 
+// Methods that involve proving/balancing need longer timeouts
+const SLOW_METHODS = new Set([
+  'balanceUnsealedTransaction',
+  'balanceSealedTransaction',
+  'submitTransaction',
+  'makeTransfer',
+  'makeIntent',
+]);
+
+const SLOW_TIMEOUT_MS = 5 * 60_000; // 5 minutes
+const DEFAULT_TIMEOUT_MS = 30_000;   // 30 seconds
+
 function sendRequest(payload) {
   return new Promise((resolve, reject) => {
     const requestId = `gsd-${Date.now()}-${++requestCounter}`;
+    const method = payload.method;
+    const timeoutMs = method && SLOW_METHODS.has(method)
+      ? SLOW_TIMEOUT_MS
+      : DEFAULT_TIMEOUT_MS;
 
     const timeout = setTimeout(() => {
       window.removeEventListener('message', handleResponse);
-      const err = new Error('Request timed out after 30s');
+      const label = `${Math.round(timeoutMs / 1000)}s`;
+      const err = new Error(`Request timed out after ${label}`);
       err.type = 'DAppConnectorAPIError';
       err.code = 'InternalError';
-      err.reason = 'Request timed out after 30s';
+      err.reason = `Request timed out after ${label}`;
       reject(err);
-    }, 30_000);
+    }, timeoutMs);
 
     function handleResponse(event) {
       if (event.source !== window) return;

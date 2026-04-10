@@ -21,7 +21,7 @@ export function allowNewConnections(): void {
 }
 
 // Install wrapper as side effect on first import
-const OrigWebSocket = globalThis.WebSocket;
+export const OrigWebSocket = globalThis.WebSocket;
 
 const WebSocketWrapper = function (
   this: unknown,

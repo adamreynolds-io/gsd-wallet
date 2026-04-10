@@ -1,20 +1,35 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePopupStore } from '@popup/store/popupStore';
 import { ENVIRONMENT_OPTIONS, ENVIRONMENTS } from '@shared/environments';
-import type { Environment } from '@shared/types';
+import type { Environment, SocketState } from '@shared/types';
+import { useSocketToggle } from '@popup/hooks/useSocketToggle';
 
 export function Settings() {
   const navigate = useNavigate();
   const currentEnv = usePopupStore((s) => s.environment);
   const showStatusMessage = usePopupStore((s) => s.showStatusMessage);
+  const setSocketState = usePopupStore((s) => s.setSocketState);
+  const { socketState, enable, disable } = useSocketToggle();
   const [environment, setEnvironment] = useState<Environment>(currentEnv);
+  const [connectUrl, setConnectUrl] = useState('ws://localhost:6372');
   const [customUrls, setCustomUrls] = useState({
     nodeWsUrl: ENVIRONMENTS[currentEnv].nodeWsUrl,
     indexerHttpUrl: ENVIRONMENTS[currentEnv].indexerHttpUrl,
     indexerWsUrl: ENVIRONMENTS[currentEnv].indexerWsUrl,
     provingServerUrl: ENVIRONMENTS[currentEnv].provingServerUrl,
   });
+
+  useEffect(() => {
+    const port = chrome.runtime.connect({ name: 'gsd-popup' });
+    port.onMessage.addListener((msg: { type: string; state?: SocketState }) => {
+      if (msg.type === 'CONNECT_STATUS' && msg.state !== undefined) {
+        setSocketState(msg.state);
+      }
+    });
+    port.postMessage({ type: 'GET_CONNECT_STATUS' });
+    return () => port.disconnect();
+  }, [setSocketState]);
 
   function handleNetworkChange(env: Environment) {
     setEnvironment(env);
@@ -44,6 +59,16 @@ export function Settings() {
     showStatusMessage('Settings applied, restarting wallet...', 'info');
     port.disconnect();
     setTimeout(() => navigate('/dashboard'), 1500);
+  }
+
+  function handleConnectToggle() {
+    if (socketState === 'off') {
+      enable(connectUrl);
+      showStatusMessage('Socket enabling...', 'info');
+    } else {
+      disable();
+      showStatusMessage('Socket disabled', 'info');
+    }
   }
 
   function handleReset() {
@@ -104,6 +129,39 @@ export function Settings() {
         <input className="input-field text-xs !py-1.5" value={customUrls.provingServerUrl}
           onChange={(e) => setCustomUrls((u) => ({ ...u, provingServerUrl: e.target.value }))} />
       </Field>
+
+      <hr className="border-midnight-500 my-1" />
+
+      <div className="text-xs text-gray-500 mb-0.5 font-semibold uppercase tracking-wider">Node.js Socket</div>
+      <div className="flex gap-2 items-end">
+        <div className="flex-1">
+          <Field label="Socket URL">
+            <input
+              className="input-field text-xs !py-1.5"
+              value={connectUrl}
+              onChange={(e) => setConnectUrl(e.target.value)}
+              placeholder="ws://localhost:6372"
+              disabled={socketState !== 'off'}
+            />
+          </Field>
+        </div>
+        <button
+          className={`text-xs !py-1.5 px-3 rounded ${socketState !== 'off' ? 'btn-danger' : 'btn-secondary'}`}
+          onClick={handleConnectToggle}
+        >
+          {socketState === 'off' ? 'Enable' : 'Disable'}
+        </button>
+      </div>
+      <div className="flex items-center gap-1.5 text-xs text-gray-500">
+        <span className={`w-2 h-2 rounded-full ${
+          socketState === 'active' ? 'bg-green-500' :
+          socketState === 'waiting' ? 'bg-amber-400' :
+          'bg-gray-600'
+        }`} />
+        {socketState === 'active' ? 'Session active' :
+         socketState === 'waiting' ? 'Waiting for Node.js connection' :
+         'Socket off'}
+      </div>
 
       <div className="flex gap-2 mt-1">
         <button className="btn-secondary flex-1 text-xs !py-1.5" onClick={handleReset}>Reset</button>

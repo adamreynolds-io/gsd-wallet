@@ -4,6 +4,7 @@ import type {
   DiagnosticEvent,
   DiagnosticLevel,
   SerializedWalletState,
+  SocketState,
   WalletStatus,
   Environment,
 } from '@shared/types';
@@ -31,6 +32,8 @@ interface PopupState {
 
   updateAvailable: { latestVersion: string; releaseUrl: string; downloadUrl: string } | null;
 
+  socketState: SocketState;
+
   setStatus: (status: WalletStatus) => void;
   setHasVault: (hasVault: boolean) => void;
   setWalletState: (state: SerializedWalletState) => void;
@@ -49,6 +52,8 @@ interface PopupState {
   setDiagnosticCategory: (category: DiagnosticCategory, on: boolean) => void;
   clearDiagnosticEvents: () => void;
   setUpdateAvailable: (info: { latestVersion: string; releaseUrl: string; downloadUrl: string }) => void;
+
+  setSocketState: (state: SocketState) => void;
 }
 
 export const usePopupStore = create<PopupState>((set) => ({
@@ -64,6 +69,8 @@ export const usePopupStore = create<PopupState>((set) => ({
   diagnosticCategoryFilter: makeFilterRecord(DIAGNOSTIC_CATEGORIES),
 
   updateAvailable: null,
+
+  socketState: 'off',
 
   setStatus: (status) => set({ status }),
   setHasVault: (hasVault) => set({ hasVault }),
@@ -91,7 +98,15 @@ export const usePopupStore = create<PopupState>((set) => ({
     }),
 
   addDiagnosticEventsBatch: (events) =>
-    set({ diagnosticEvents: events.slice(-MAX_DIAGNOSTIC_EVENTS) }),
+    set((s) => {
+      const existing = s.diagnosticEvents;
+      const seenIds = new Set(events.map((e) => e.id));
+      const kept = existing.filter((e) => !seenIds.has(e.id));
+      const merged = [...kept, ...events]
+        .sort((a, b) => a.id - b.id)
+        .slice(-MAX_DIAGNOSTIC_EVENTS);
+      return { diagnosticEvents: merged };
+    }),
 
   setDiagnosticLevel: (level, on) =>
     set((s) => ({
@@ -106,4 +121,6 @@ export const usePopupStore = create<PopupState>((set) => ({
   clearDiagnosticEvents: () => set({ diagnosticEvents: [] }),
 
   setUpdateAvailable: (info) => set({ updateAvailable: info }),
+
+  setSocketState: (state) => set({ socketState: state }),
 }));

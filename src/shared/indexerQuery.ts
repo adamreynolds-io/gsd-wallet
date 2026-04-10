@@ -64,16 +64,22 @@ export async function fetchTxDetail(
   environment: Environment,
   txHash: string,
 ): Promise<TxDetail | null> {
+  // The SDK returns 66-char identifiers (1-byte version prefix + 32-byte hash).
+  // The indexer expects raw 32-byte hashes (64 hex chars).
+  const normalizedHash = txHash.length === 66 && txHash.startsWith('00')
+    ? txHash.slice(2)
+    : txHash;
+
   const config = getEnvironmentConfig(environment);
   const url = config.indexerHttpUrl;
 
-  console.log(`[GSD Explorer] Fetching tx ${txHash} from ${url}`);
+  console.log(`[GSD Explorer] Fetching tx ${normalizedHash} from ${url}${normalizedHash !== txHash ? ` (normalized from ${txHash})` : ''}`);
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       query: TX_DETAIL_QUERY,
-      variables: { hash: txHash },
+      variables: { hash: normalizedHash },
     }),
   });
 
@@ -243,6 +249,12 @@ export async function fetchContractDetail(
   environment: Environment,
   address: string,
 ): Promise<ContractDetail | null> {
+  // The SDK returns 66-char identifiers (1-byte version prefix + 32-byte hash).
+  // The indexer expects raw 32-byte hashes (64 hex chars).
+  const normalizedAddress = address.length === 66 && address.startsWith('00')
+    ? address.slice(2)
+    : address;
+
   const config = getEnvironmentConfig(environment);
   const url = config.indexerHttpUrl;
 
@@ -251,7 +263,7 @@ export async function fetchContractDetail(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       query: CONTRACT_DETAIL_QUERY,
-      variables: { address },
+      variables: { address: normalizedAddress },
     }),
   });
 

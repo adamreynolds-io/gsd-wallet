@@ -1,0 +1,44 @@
+{
+  "name": "gsd-wallet-connect",
+  "version": "0.1.0",
+  "description": "Node.js socket for GSD Wallet — connect test harnesses and dApps to a running GSD Wallet Chrome extension",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "NODE_OPTIONS='--experimental-vm-modules --import ./test/preload-ws.mjs' vitest --config vitest.integration.config.ts run"
+  },
+  "dependencies": {
+    "ws": "8.18.1"
+  },
+  "devDependencies": {
+    "@midnight-ntwrk/compact-js": "^2.5.0",
+    "@midnight-ntwrk/compact-runtime": "^0.15.0",
+    "@midnight-ntwrk/ledger-v8": "^8.0.3",
+    "@midnight-ntwrk/midnight-js": "^4.0.4",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "^4.0.4",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "^4.0.4",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "^4.0.4",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "^4.0.4",
+    "@types/ws": "8.5.14",
+    "tsx": "4.21.0",
+    "typescript": "5.8.3",
+    "vitest": "4.1.2"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT"
+}

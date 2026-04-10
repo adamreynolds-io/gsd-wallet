@@ -1,0 +1,5 @@
+dist/
+node_modules/
+midnight-level-db/
+gsd-counter-*/
+*.tsbuildinfo

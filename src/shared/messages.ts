@@ -1,7 +1,9 @@
 import type {
   DiagnosticEvent,
+  DiagnosticLevel,
   Environment,
   SerializedWalletState,
+  SocketState,
   TransactionResult,
   TxHistoryEntry,
 } from './types';
@@ -63,7 +65,10 @@ export type PopupRequest =
   | { type: 'GET_TX_HISTORY' }
   | { type: 'GET_DIAGNOSTIC_BACKLOG' }
   | { type: 'CLEAR_ALL' }
-  | { type: 'EXPORT_CACHE' };
+  | { type: 'EXPORT_CACHE' }
+  | { type: 'SET_CONNECT_URL'; url: string }
+  | { type: 'GET_CONNECT_STATUS' }
+  | { type: 'END_SOCKET_SESSION' };
 
 export type PopupResponse =
   | { type: 'STATE_UPDATE'; state: SerializedWalletState }
@@ -86,7 +91,8 @@ export type PopupResponse =
   | { type: 'DIAGNOSTIC_EVENTS_BATCH'; events: DiagnosticEvent[] }
   | { type: 'UPDATE_AVAILABLE'; currentVersion: string; latestVersion: string; releaseUrl: string; downloadUrl: string }
   | { type: 'ERROR'; error: string }
-  | { type: 'EXPORT_CACHE_RESULT'; data: string };
+  | { type: 'EXPORT_CACHE_RESULT'; data: string }
+  | { type: 'CONNECT_STATUS'; state: SocketState; sessionId?: string };
 
 export interface TransferRequest {
   tokenType: 'shielded' | 'unshielded';
@@ -135,7 +141,12 @@ export type OffscreenRequestType =
   | 'DUST_DEREGISTER'
   | 'GET_TX_HISTORY'
   | 'GET_DIAGNOSTIC_BACKLOG'
-  | 'EXPORT_CACHE';
+  | 'EXPORT_CACHE'
+  | 'SET_CONNECT_URL'
+  | 'GET_CONNECT_STATUS'
+  | 'GET_SOCKET_STATE'
+  | 'END_SOCKET_SESSION'
+  | 'SOCKET_DAPP_RESPONSE';
 
 export interface OffscreenResponse {
   id: string;
@@ -145,6 +156,30 @@ export interface OffscreenResponse {
 
 export interface OffscreenBroadcast {
   id: null;
-  type: 'STATE_UPDATE' | 'DIAGNOSTIC_EVENT' | 'HEARTBEAT' | 'READY';
+  type: 'STATE_UPDATE' | 'DIAGNOSTIC_EVENT' | 'HEARTBEAT' | 'READY' | 'CONNECT_EVENT' | 'SOCKET_STATE_CHANGE' | 'SOCKET_DAPP_REQUEST';
   payload: unknown;
 }
+
+// --- GSD Connect wire protocol (offscreen worker <-> Node.js WS server) ---
+
+export interface ConnectEventPayload {
+  level: DiagnosticLevel;
+  message: string;
+  data?: unknown;
+  elapsed?: number;
+  timestamp: number;
+}
+
+export type NodeToGsdMessage =
+  | { type: 'TRACE_EVENT'; payload: ConnectEventPayload }
+  | { type: 'DAPP_REQUEST'; requestId: string; payload: DAppRequest }
+  | { type: 'GSD_DISCONNECT'; sessionId: string }
+  | { type: 'PING' };
+
+export type GsdToNodeMessage =
+  | { type: 'DIAGNOSTIC_EVENT'; event: DiagnosticEvent }
+  | { type: 'DAPP_RESPONSE'; requestId: string; payload: DAppResponse }
+  | { type: 'STATE_UPDATE'; state: SerializedWalletState }
+  | { type: 'SESSION_ENDED'; reason: string }
+  | { type: 'CONNECTED' }
+  | { type: 'PONG' };

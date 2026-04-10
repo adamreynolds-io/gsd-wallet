@@ -289,7 +289,7 @@ export function Dashboard() {
 
         {/* Diagnostics panel */}
         <div className="w-[60%] min-w-0 border-l border-midnight-500">
-          <DiagnosticsPanel />
+          <DiagnosticsPanel onInspect={inspect} />
         </div>
       </div>
 

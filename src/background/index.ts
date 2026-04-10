@@ -118,6 +118,16 @@ rehydrate().then(async () => {
   emit('info', 'sw', 'Service worker started', { sessionId });
   startUpdateChecker();
   await ensureOffscreenReady();
+
+  // Auto-connect socket if previously enabled
+  const socketConfigResult = await chrome.storage.local.get('gsdSocketConfig');
+  const socketCfg = socketConfigResult['gsdSocketConfig'] as { url?: string; enabled?: boolean } | undefined;
+  if (socketCfg?.enabled && socketCfg.url) {
+    offscreenClient.request('SET_CONNECT_URL', { url: socketCfg.url }).catch(() => {
+      emit('warn', 'connect', 'Socket auto-connect failed');
+    });
+  }
+
   await autoUnlockWallet();
 }).catch((err) => {
   emit('error', 'sw', 'Failed during SW init', { error: String(err) });

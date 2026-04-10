@@ -37,7 +37,7 @@ function flush(): void {
     flushTimer = null;
   }
   pendingSince = 0;
-  chrome.storage.session.set({ [STORAGE_KEY]: buffer });
+  chrome.storage.local.set({ [STORAGE_KEY]: buffer });
 }
 
 export function emit(
@@ -87,7 +87,7 @@ export function onEvent(cb: (event: DiagnosticEvent) => void): () => void {
  * Call once at SW startup, before emitting any new events.
  */
 export async function rehydrate(): Promise<void> {
-  const stored = await chrome.storage.session.get(STORAGE_KEY);
+  const stored = await chrome.storage.local.get(STORAGE_KEY);
   const events = stored[STORAGE_KEY] as DiagnosticEvent[] | undefined;
   if (events && events.length > 0) {
     buffer.push(...events);
