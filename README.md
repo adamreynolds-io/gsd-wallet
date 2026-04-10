@@ -51,9 +51,11 @@ Load `dist/` as above.
 - **Sync phase in header** — Connecting/Syncing X%/Stalled/Synced displayed next to the wallet name
 - **Stall detection** — automatic detection when sync stops advancing for 30s
 - **SDK console interception** — captures `@polkadot/api` RPC-CORE errors and WebSocket disconnects
-- **Persistent diagnostics** — 2000-event ring buffer in the SW persisted to `chrome.storage.session`; offscreen diagnostics kept in-memory (persistent document)
-- **Filterable event stream** — filter by level (DBG/INF/WRN/ERR) and category (SW/Wallet/State/Sync/SDK/DApp/API/Pop/Tx/Idx/Sto/Err)
+- **Persistent diagnostics** — 2000-event ring buffer persisted to `chrome.storage.local`; survives extension reloads and SW restarts
+- **Filterable event stream** — filter by level (DBG/INF/WRN/ERR) and category (SW/Wallet/State/Sync/SDK/DApp/API/Pop/Tx/Idx/Sto/Err/Conn)
 - **Log export** — download all diagnostic events as NDJSON with ISO timestamps
+- **Failed tx download** — when a transaction fails, download the raw tx bytes as `.bin` for offline debugging
+- **TX heartbeat** — 10s liveness heartbeats during long-running operations; pauses during CPU-bound WASM steps
 - **Debug tabs** — real-time sync progress, UTXO inspection, token balances per subsystem, transaction history
 - **Built-in explorer** — query the v4 indexer for transaction, block, and contract details
 - **Shared event cache** — network events cached in IndexedDB, shared across wallets on the same network
@@ -64,7 +66,7 @@ Load `dist/` as above.
 ## Architecture
 
 ```
-DApp <-> content script <-> service worker (23KB) <-> offscreen relay (800B) <-> Web Worker (1.7MB SDK)
+DApp <-> content script <-> service worker (4KB) <-> offscreen relay (635B) <-> Web Worker (1.5MB SDK)
 ```
 
 The SDK runs in a **Web Worker** spawned by an offscreen document. Chrome does not monitor Workers for responsiveness, so heavy SDK operations (balancing, proving) never trigger "Page Unresponsive" dialogs.
@@ -95,7 +97,9 @@ The wallet syncs three subsystems independently:
 | **Unshielded** | Only your transactions | Public — indexer can filter by address without privacy risk |
 | **Dust** | All dust events on chain | Same privacy model as shielded — local filtering |
 
-**First sync is slow on mainnet** (~89k shielded + ~89k dust events), but a bundled cache snapshot ships with the extension — fresh install syncs from local cache in ~1:49 (with custom ledger WASM using bulk `replayEventsFromRaw`) or ~3:17 (with the official SDK using per-event fallback), down from 6+ min from the indexer. The unshielded subsystem syncs instantly.
+**First sync is slow on mainnet** (~89k shielded + ~89k dust events), but a bundled cache snapshot ships with the extension — fresh install syncs from local cache in ~3 min, down from 6+ min from the indexer. The unshielded subsystem syncs instantly.
+
+> **v0.9.0:** The custom ledger WASM (`@midnight-ntwrk/zkir-v2` with `replayEventsFromRaw` bulk replay) has been removed. The wallet now uses the official `@midnight-ntwrk/ledger-v8` WASM exclusively. The bulk replay code path is still present and will activate automatically if a future SDK release adds `replayEventsFromRaw` support.
 
 Two-phase initialization ensures the UI is never blocked:
 1. **Phase 1 (fast):** Load checkpoint, create facade, subscribe to state, emit initial state to UI
@@ -131,6 +135,32 @@ npm run localnet:reset # nuke volumes and restart fresh
 The wallet injects `window.midnight[uuid]` on all pages and dispatches `midnight#ready` for discovery.
 
 **17 API methods:** `getShieldedBalances`, `getUnshieldedBalances`, `getDustBalance`, `getShieldedAddresses`, `getUnshieldedAddress`, `getDustAddress`, `getConfiguration`, `getConnectionStatus`, `makeTransfer`, `balanceUnsealedTransaction`, `balanceSealedTransaction`, `submitTransaction`, `signData`, `getTxHistory`, `hintUsage`, `getProvingProvider`, `makeIntent`.
+
+## Midnight GSD Connect (socket integration)
+
+Node.js applications can interact with the wallet via WebSocket using the `gsd-wallet-connect` package (`packages/gsd-socket`). The included [example](packages/gsd-socket/example.ts) deploys a Compact counter contract through the wallet and reads on-chain state:
+
+```
+$ cd packages/gsd-socket && ./node_modules/.bin/tsx example.ts
+
+Listening on ws://127.0.0.1:6372 — enable socket in wallet...
+Wallet connected.
+
+Network:  undeployed
+Indexer:  http://localhost:8088/api/v4/graphql
+Prover:   http://localhost:6300
+Dust:     cap=1250000000000000000000000 balance=1250000000000000000000000
+
+Deploying counter contract (initial privateCounter=0)...
+Contract: 6bc431b20ffb9404571d8d07470f63611327173f8d4e446553fd966a691d743c
+On-chain round: 0
+
+Done. Check the wallet diagnostics panel — filter by "Conn" to see trace events.
+```
+
+Click the socket icon in the wallet header to enable. The extension connects as a WebSocket client to your Node.js server and routes all requests through the same DApp connector pipeline (session tracking, validation, diagnostics). Trace events from the script appear in the diagnostics panel under the "Conn" category — including witness definitions, private state, and contract addresses.
+
+See [Integration Guide](docs/WALLET-INTEGRATION-GUIDE.md#15-gsd-connect-socket-integration) for the full API reference.
 
 ## Explorer
 
@@ -173,7 +203,7 @@ All operations that a production wallet would prompt the user for (connection ap
 
 - **Contract call transactions fail in Chrome** — `balanceUnsealedTransaction` fails with `IntentSegmentIdCollision` for contract call transactions in the Chrome extension context. The same code path succeeds in Node.js. Deploy transactions work fine. This is an upstream SDK/ledger issue — no workaround exists for dApp developers. See [#45](https://github.com/adamreynolds-io/gsd-wallet/issues/45).
 - **Mainnet RPC disconnects** — The mainnet RPC node periodically drops WebSocket connections with `1000: Normal Closure`. The SDK reconnects automatically but sync can stall temporarily.
-- **First mainnet sync takes ~1:49–3:17** — ~89k shielded + ~89k dust events are replayed from the bundled cache snapshot. ~1:49 with custom ledger WASM (`replayEventsFromRaw` bulk path); ~3:17 with the official SDK (per-event fallback). Was 6+ min from indexer. Subsequent opens resume from per-wallet checkpoints.
+- **First mainnet sync takes ~3 min** — ~89k shielded + ~89k dust events replayed from the bundled cache snapshot. Was 6+ min from indexer. Subsequent opens resume from per-wallet checkpoints.
 
 ## Documentation
 

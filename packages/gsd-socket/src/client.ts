@@ -24,6 +24,13 @@ const BIGINT_FIELDS_METHODS: Record<string, string[]> = {
   getDustBalance: ['cap', 'balance'],
 };
 
+function toBigInt(value: unknown, label: string): bigint {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') return BigInt(value);
+  if (typeof value === 'string') return BigInt(value);
+  throw new Error(`Cannot convert ${typeof value} to BigInt (${label})`);
+}
+
 function deserializeBigInts(
   method: string,
   result: unknown,
@@ -37,7 +44,7 @@ function deserializeBigInts(
     for (const [k, v] of Object.entries(
       result as Record<string, unknown>,
     )) {
-      converted[k] = BigInt(v as string);
+      converted[k] = toBigInt(v, `${method}.${k}`);
     }
     return converted;
   }
@@ -47,7 +54,7 @@ function deserializeBigInts(
     const obj = { ...(result as Record<string, unknown>) };
     for (const field of fields) {
       if (field in obj) {
-        obj[field] = BigInt(obj[field] as string);
+        obj[field] = toBigInt(obj[field], `${method}.${field}`);
       }
     }
     return obj;
@@ -60,6 +67,7 @@ export class GsdWalletConnect {
   private server: GsdConnectServer;
   private sessionId: string | null = null;
   private sessionActive = false;
+  private connecting = false;
   private readonly origin: string;
   private ownsServer: boolean;
   private unsubSessionEnded: (() => void) | null = null;
@@ -88,23 +96,28 @@ export class GsdWalletConnect {
   }
 
   async connect(networkId: string): Promise<void> {
-    if (this.sessionActive) {
+    if (this.sessionActive || this.connecting) {
       throw new Error('Already connected — call disconnect() first');
     }
+    this.connecting = true;
     const requestId = nextRequestId();
     const payload: DAppRequest = {
       type: 'GSD_CONNECT',
       networkId,
       origin: this.origin,
     };
-    const result = await this.server.sendDappRequest(requestId, payload);
-    this.sessionId = result as string;
-    this.sessionActive = true;
-    this.unsubSessionEnded?.();
-    this.unsubSessionEnded = this.server.onSessionEnded(() => {
-      this.sessionActive = false;
-      this.sessionId = null;
-    });
+    try {
+      const result = await this.server.sendDappRequest(requestId, payload);
+      this.sessionId = result as string;
+      this.sessionActive = true;
+      this.unsubSessionEnded?.();
+      this.unsubSessionEnded = this.server.onSessionEnded(() => {
+        this.sessionActive = false;
+        this.sessionId = null;
+      });
+    } finally {
+      this.connecting = false;
+    }
   }
 
   async disconnect(): Promise<void> {

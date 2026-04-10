@@ -64,11 +64,53 @@ export function setupMessageRouter(): void {
     if (broadcast.type === 'SOCKET_STATE_CHANGE') {
       const { state, sessionId } = broadcast.payload as { state: SocketState; sessionId?: string };
       // Persist so popup picks it up on reopen
-      chrome.storage.session.set({ gsdSocketState: state });
+      chrome.storage.session.set({ gsdSocketState: state }).catch(() => { /* best-effort persist */ });
       const msg: PopupResponse = { type: 'CONNECT_STATUS', state, ...(sessionId !== undefined ? { sessionId } : {}) };
       for (const port of connectedPorts) {
         try { port.postMessage(msg); } catch { /* */ }
       }
+    }
+    if (broadcast.type === 'SOCKET_DAPP_REQUEST') {
+      const { socketRequestId, dappPayload, origin } = broadcast.payload as {
+        socketRequestId: string;
+        dappPayload: Record<string, unknown>;
+        origin: string;
+      };
+
+      if (dappPayload['type'] === 'GSD_DISCONNECT') {
+        const sessionId = dappPayload['sessionId'] as string;
+        if (sessions.has(sessionId)) {
+          sessions.delete(sessionId);
+          emit('info', 'dapp', `Socket session removed`, { sessionId, origin });
+        }
+        return;
+      }
+
+      handleDappRequest(dappPayload, origin)
+        .then((response) => {
+          let sessionId: string | undefined;
+          const resp = response as Record<string, unknown>;
+          if (dappPayload['type'] === 'GSD_CONNECT' && resp?.['type'] === 'GSD_RESPONSE') {
+            sessionId = resp['result'] as string;
+          }
+          return offscreenClient.request('SOCKET_DAPP_RESPONSE', {
+            socketRequestId,
+            response,
+            sessionId,
+          });
+        })
+        .catch((e) => {
+          emit('error', 'error', `Socket dApp request failed`, {
+            socketRequestId, error: String(e),
+          });
+          offscreenClient.request('SOCKET_DAPP_RESPONSE', {
+            socketRequestId,
+            response: {
+              type: 'GSD_ERROR',
+              error: { code: 'InternalError', reason: String(e) },
+            },
+          }).catch(() => { /* delivery failed */ });
+        });
     }
   });
 
@@ -345,6 +387,11 @@ async function handlePopupMessage(
       case 'SWITCH_WALLET': {
         try {
           await offscreenClient.request('END_SOCKET_SESSION', null).catch(() => { /* no session */ });
+          const walletSessionCount = sessions.size;
+          sessions.clear();
+          if (walletSessionCount > 0) {
+            emit('info', 'dapp', `Cleared ${walletSessionCount} dApp sessions on wallet switch`);
+          }
           const seed = await stateManager.switchWallet(msg.index);
           const info = await stateManager.getActiveWalletInfo();
           if (info) {
@@ -517,7 +564,8 @@ async function handlePopupMessage(
       case 'CLEAR_ALL': {
         await offscreenClient.request('STOP_WALLET', null);
         await stateManager.clearAll();
-        chrome.storage.session.remove(['gsdLastState', 'gsdDiagnosticEvents']);
+        chrome.storage.session.remove(['gsdLastState']);
+        chrome.storage.local.remove(['gsdDiagnosticEvents']);
         break;
       }
 

@@ -92,8 +92,8 @@ export function useWalletConnection(): void {
       },
     );
 
-    // Read cached state and diagnostic events from session storage
-    chrome.storage.session.get(['gsdEnvironment', 'gsdLastState', 'gsdDiagnosticEvents', 'gsdSocketState']).then((result) => {
+    // Read cached session state (wallet, socket, environment)
+    chrome.storage.session.get(['gsdEnvironment', 'gsdLastState', 'gsdSocketState']).then((result) => {
       const store = usePopupStore.getState();
       if (result['gsdLastState'] && !store.walletState) {
         store.setWalletState(result['gsdLastState'] as SerializedWalletState);
@@ -103,34 +103,41 @@ export function useWalletConnection(): void {
       } else if (result['gsdEnvironment']) {
         store.setEnvironment(result['gsdEnvironment'] as import('@shared/types').Environment);
       }
-      const cachedEvents = result['gsdDiagnosticEvents'] as import('@shared/types').DiagnosticEvent[] | undefined;
-      if (cachedEvents?.length) {
-        store.addDiagnosticEventsBatch(cachedEvents);
-      }
       const cachedSocketState = result['gsdSocketState'] as import('@shared/types').SocketState | undefined;
       if (cachedSocketState) {
         store.setSocketState(cachedSocketState);
       }
     });
 
+    // Read diagnostic events from local storage (persists across extension reloads)
+    chrome.storage.local.get('gsdDiagnosticEvents').then((result) => {
+      const cachedEvents = result['gsdDiagnosticEvents'] as import('@shared/types').DiagnosticEvent[] | undefined;
+      if (cachedEvents?.length) {
+        usePopupStore.getState().addDiagnosticEventsBatch(cachedEvents);
+      }
+    });
+
     // Live state updates via storage change listener — works regardless of port state
     const storageListener = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
-      if (area !== 'session') return;
-      if (changes['gsdLastState']?.newValue) {
-        const state = changes['gsdLastState'].newValue as SerializedWalletState;
-        const store = usePopupStore.getState();
-        if (store.hasVault !== false) {
-          if (store.hasVault === null) store.setHasVault(true);
-          store.setWalletState(state);
+      if (area === 'session') {
+        if (changes['gsdLastState']?.newValue) {
+          const state = changes['gsdLastState'].newValue as SerializedWalletState;
+          const store = usePopupStore.getState();
+          if (store.hasVault !== false) {
+            if (store.hasVault === null) store.setHasVault(true);
+            store.setWalletState(state);
+          }
+        }
+        if (changes['gsdSocketState']?.newValue) {
+          const store = usePopupStore.getState();
+          store.setSocketState(changes['gsdSocketState'].newValue as import('@shared/types').SocketState);
         }
       }
-      if (changes['gsdDiagnosticEvents']?.newValue) {
-        const store = usePopupStore.getState();
-        store.addDiagnosticEventsBatch(changes['gsdDiagnosticEvents'].newValue as import('@shared/types').DiagnosticEvent[]);
-      }
-      if (changes['gsdSocketState']?.newValue) {
-        const store = usePopupStore.getState();
-        store.setSocketState(changes['gsdSocketState'].newValue as import('@shared/types').SocketState);
+      if (area === 'local') {
+        if (changes['gsdDiagnosticEvents']?.newValue) {
+          const store = usePopupStore.getState();
+          store.addDiagnosticEventsBatch(changes['gsdDiagnosticEvents'].newValue as import('@shared/types').DiagnosticEvent[]);
+        }
       }
     };
     chrome.storage.onChanged.addListener(storageListener);

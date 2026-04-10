@@ -25,7 +25,7 @@ export function Header() {
     <>
     <header className="flex items-center justify-between px-4 py-2 bg-midnight-800 border-b border-midnight-500 shrink-0">
       <div className="flex items-center gap-2">
-        <h1 className="text-lg font-bold text-white tracking-wide">G.S.D. Wallet</h1>
+        <h1 className="text-lg font-bold text-white tracking-wide">Midnight G.S.D. Wallet</h1>
         {isActive && (
           <>
             <div className="relative" ref={menuContainerRef}>

@@ -588,17 +588,46 @@ function deserializeBigInts(method: string, result: unknown): unknown {
 
 ### Request timeout
 
-Add a timeout on inpage requests to prevent hung promises. Proving-heavy operations (contract calls, transfers) take 15-30+ seconds, so the timeout must be long enough to accommodate proving and submission:
+Inpage requests use **per-method timeouts** to handle the difference between fast queries and slow proving operations:
 
-```typescript
-const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes — proving + submission can take 30+ seconds
-const timeout = setTimeout(() => {
-  window.removeEventListener('message', handleResponse);
-  reject(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`));
-}, REQUEST_TIMEOUT_MS);
+```javascript
+const SLOW_METHODS = new Set([
+  'balanceUnsealedTransaction',
+  'balanceSealedTransaction',
+  'submitTransaction',
+  'makeTransfer',
+  'makeIntent',
+]);
+
+const SLOW_TIMEOUT_MS = 5 * 60_000; // 5 minutes
+const DEFAULT_TIMEOUT_MS = 30_000;   // 30 seconds
+
+const timeoutMs = method && SLOW_METHODS.has(method) ? SLOW_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
 ```
 
-**Reference:** `gsd-wallet/src/content-script/inpage.ts`
+**Trap:** A single global timeout forces a tradeoff — too short and proving operations fail, too long and broken queries hang forever. Per-method timeouts solve this.
+
+**Reference:** `gsd-wallet/src/content-script/inpage.js`
+
+### BigInt deserialization: field-level methods
+
+Some methods return objects with specific BigInt fields rather than full BigInt records:
+
+```javascript
+const BIGINT_FIELDS_METHODS = {
+  getDustBalance: ['cap', 'balance'],
+};
+```
+
+These fields are individually converted to `BigInt` while leaving other fields as-is. Both `BIGINT_RECORD_METHODS` and `BIGINT_FIELDS_METHODS` must be updated when adding new API methods that return BigInt values.
+
+### Transaction diagnostics
+
+When a transaction method fails (balance, prove, or submit), the extension emits a `debug`-level diagnostic event containing the input transaction hex. This allows developers to download the raw bytes of the failed transaction for offline debugging.
+
+During long-running transaction operations, the extension emits heartbeat events every 10 seconds. Heartbeats pause during CPU-bound WASM steps (balancing, proving) because the worker thread is blocked — silence during these phases is expected and indicates the SDK is actively working, not hung.
+
+**Reference:** `gsd-wallet/src/offscreen/connectedApiHandler.ts`
 
 ### Service worker race condition
 
@@ -1093,3 +1122,88 @@ Code audit performed 2026-04-04 against wallet-sdk v3.0.0 documentation.
 - Uses `CustomShieldedWallet(cfg, builder)` with a caching sync builder instead of the default `ShieldedWallet(cfg)` — injects a custom sync service that caches events to IndexedDB
 - Uses a local `CustomDustWallet(cfg, builder)` wrapper because the SDK doesn't export a `CustomDustWallet` — mirrors the SDK's `DustWallet` factory with builder injection support
 - Uses `.startWithSeed()` instead of `.startWithSecretKeys()` — both are valid API entry points documented in the SDK
+
+---
+
+## 15. GSD Connect (Socket Integration)
+
+GSD Connect lets Node.js applications (test harnesses, CLI tools, dApps) interact with a running GSD Wallet instance via WebSocket. The `gsd-wallet-connect` package (`packages/gsd-socket`) provides the server and client.
+
+### Architecture
+
+```
+Node.js app                          GSD Wallet Extension
+  GsdConnectServer (ws://127.0.0.1:6372)  <---  connectClient (WebSocket client)
+  GsdWalletConnect (client API)                  routes through handleDappRequest()
+```
+
+The extension connects as a WebSocket **client** to the Node.js server. The user enables the socket from the wallet UI (socket icon or Settings), then starts the external app. All DApp requests from the socket go through the same `handleDappRequest()` pipeline as browser dApps — disclaimer checks, session tracking, origin validation, sensitive method logging.
+
+### Quick start
+
+```typescript
+import { GsdWalletConnect, createProviders } from 'gsd-wallet-connect';
+
+const client = new GsdWalletConnect();
+await client.start();
+// User enables socket in wallet UI, extension connects
+
+await client.connect('testnet');
+const config = await client.getConfiguration();
+const balances = await client.getShieldedBalances(); // returns Record<string, bigint>
+
+// Provider adapters for @midnight-ntwrk/midnight-js-types
+const { walletProvider, midnightProvider } = createProviders(client);
+
+await client.disconnect();
+await client.close();
+```
+
+### Provider adapters
+
+`createWalletProvider(client)` and `createMidnightProvider(client)` return objects structurally compatible with `@midnight-ntwrk/midnight-js-types`. They handle hex serialization over the wire:
+
+- `walletProvider.balanceTx(tx)` — serializes tx to hex, calls `balanceUnsealedTransaction`, deserializes result
+- `walletProvider.getCoinPublicKey()` / `getEncryptionPublicKey()` — cached after first call
+- `midnightProvider.submitTx(tx)` — serializes, submits, returns tx hash
+
+### Socket state machine
+
+```
+off → (user enables) → waiting → (app connects) → active → (disconnect) → waiting
+                                                          → (socket close) → waiting → (reconnect) → ...
+```
+
+The extension auto-reconnects with exponential backoff (1-5s) when the socket closes. Connection timeout is 10s.
+
+### Diagnostic events
+
+Socket events appear in the diagnostics panel under the `connect` category. The extension forwards all diagnostic events and wallet state updates to the socket, so the Node.js client can subscribe:
+
+```typescript
+client.onDiagnosticEvent((event) => console.log(event));
+client.onStateChange((state) => console.log(state));
+```
+
+### DApp API methods
+
+All methods available through the browser DApp connector are also available via GSD Connect:
+
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `getShieldedBalances()` | `Record<string, bigint>` | BigInt deserialized |
+| `getUnshieldedBalances()` | `Record<string, bigint>` | BigInt deserialized |
+| `getDustBalance()` | `{ cap: bigint, balance: bigint }` | Field-level BigInt |
+| `getShieldedAddresses()` | `{ shieldedAddress, shieldedCoinPublicKey, shieldedEncryptionPublicKey }` | |
+| `getUnshieldedAddress()` | `{ unshieldedAddress }` | |
+| `getDustAddress()` | `{ dustAddress }` | |
+| `getConfiguration()` | `{ indexerUri, indexerWsUri, proverServerUri, substrateNodeUri, networkId }` | |
+| `getConnectionStatus()` | `{ status, networkId? }` | |
+| `balanceUnsealedTransaction(txHex)` | `{ tx: string }` | Slow — balance + sign + prove |
+| `balanceSealedTransaction(txHex)` | `{ tx: string }` | Slow — balance + prove |
+| `submitTransaction(txHex)` | `string` (txHash) | Network I/O |
+| `makeTransfer(outputs, options?)` | `{ tx: string }` | Slow — build + sign + prove |
+| `signData(data, options)` | `{ data, signature, verifyingKey }` | |
+| `hintUsage(methodNames)` | `void` | Pre-warm hint |
+
+**Reference:** `gsd-wallet/packages/gsd-socket/src/client.ts`, `gsd-wallet/src/offscreen/connectedApiHandler.ts`

@@ -11,9 +11,13 @@ export function useSocketToggle() {
   const sendSocketCommand = useCallback(
     (message: Record<string, unknown>) => {
       const port = chrome.runtime.connect({ name: 'gsd-popup' });
+      const timeout = setTimeout(() => {
+        port.disconnect();
+      }, 10_000);
       port.onMessage.addListener(
         (msg: { type: string; state?: SocketState }) => {
           if (msg.type === 'CONNECT_STATUS' && msg.state !== undefined) {
+            clearTimeout(timeout);
             setSocketState(msg.state);
             port.disconnect();
           }

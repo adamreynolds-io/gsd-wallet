@@ -159,6 +159,20 @@ async function handleRequest(msg: { id: string; type: string; payload: unknown }
         break;
       }
 
+      case 'SOCKET_DAPP_RESPONSE': {
+        const { socketRequestId, response, sessionId } = data as {
+          socketRequestId: string;
+          response: unknown;
+          sessionId?: string;
+        };
+        const delivered = connectClient.deliverResponse(socketRequestId, response);
+        if (delivered && sessionId) {
+          connectClient.setActiveSession(sessionId);
+        }
+        sendResponse(id, { success: true });
+        break;
+      }
+
       default:
         sendError(id, `Unknown request type: ${type}`);
     }

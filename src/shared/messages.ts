@@ -145,7 +145,8 @@ export type OffscreenRequestType =
   | 'SET_CONNECT_URL'
   | 'GET_CONNECT_STATUS'
   | 'GET_SOCKET_STATE'
-  | 'END_SOCKET_SESSION';
+  | 'END_SOCKET_SESSION'
+  | 'SOCKET_DAPP_RESPONSE';
 
 export interface OffscreenResponse {
   id: string;
@@ -155,7 +156,7 @@ export interface OffscreenResponse {
 
 export interface OffscreenBroadcast {
   id: null;
-  type: 'STATE_UPDATE' | 'DIAGNOSTIC_EVENT' | 'HEARTBEAT' | 'READY' | 'CONNECT_EVENT' | 'SOCKET_STATE_CHANGE';
+  type: 'STATE_UPDATE' | 'DIAGNOSTIC_EVENT' | 'HEARTBEAT' | 'READY' | 'CONNECT_EVENT' | 'SOCKET_STATE_CHANGE' | 'SOCKET_DAPP_REQUEST';
   payload: unknown;
 }
 

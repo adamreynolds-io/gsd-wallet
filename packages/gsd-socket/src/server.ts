@@ -30,6 +30,7 @@ export class GsdConnectServer {
   }
 
   async start(): Promise<void> {
+    if (this.wss) throw new Error('Server already started');
     return new Promise((resolve, reject) => {
       this.wss = new WebSocketServer({ port: this.port, host: this.host });
       this.wss.on('listening', () => resolve());
@@ -53,6 +54,10 @@ export class GsdConnectServer {
         this.gsdConnection = null;
         this.rejectAllPending(new Error('WebSocket connection closed'));
       }
+    });
+    ws.on('error', (err) => {
+      console.warn('[gsd-connect] WebSocket error:', err instanceof Error ? err.message : String(err));
+      ws.close();
     });
   }
 

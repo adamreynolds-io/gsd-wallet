@@ -1,4 +1,3 @@
-import { handleApiCall } from './connectedApiHandler';
 import { OrigWebSocket } from './wsTracker';
 import type { NodeToGsdMessage, GsdToNodeMessage } from '@shared/messages';
 import type { DiagnosticEvent, DiagnosticLevel, SerializedWalletState, SocketState } from '@shared/types';
@@ -31,6 +30,9 @@ let attempt = 0;
 let socketState: SocketState = 'off';
 let activeSessionId: string | null = null;
 
+const pendingSocketRequests = new Map<string, { wsRequestId: string; timer: ReturnType<typeof setTimeout> }>();
+const SOCKET_REQUEST_TTL_MS = 130_000;
+
 function send(msg: GsdToNodeMessage): void {
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(msg));
@@ -38,16 +40,6 @@ function send(msg: GsdToNodeMessage): void {
 }
 
 function broadcastStateChange(): void {
-  self.postMessage({
-    id: null,
-    type: 'CONNECT_EVENT',
-    payload: {
-      level: 'info',
-      message: `Socket state: ${socketState}`,
-      data: { state: socketState, sessionId: activeSessionId },
-      timestamp: Date.now(),
-    },
-  });
   self.postMessage({
     id: null,
     type: 'SOCKET_STATE_CHANGE',
@@ -78,10 +70,22 @@ async function handleMessage(raw: string): Promise<void> {
   }
 
   if (msg.type === 'GSD_DISCONNECT') {
+    const closedSessionId = activeSessionId;
     if (socketState === 'active' && msg.sessionId === activeSessionId) {
       activeSessionId = null;
       socketState = 'waiting';
       broadcastStateChange();
+    }
+    if (closedSessionId) {
+      self.postMessage({
+        id: null,
+        type: 'SOCKET_DAPP_REQUEST',
+        payload: {
+          socketRequestId: crypto.randomUUID(),
+          dappPayload: { type: 'GSD_DISCONNECT', sessionId: msg.sessionId },
+          origin: 'gsd-connect',
+        },
+      });
     }
     return;
   }
@@ -114,14 +118,27 @@ async function handleMessage(raw: string): Promise<void> {
         });
         return;
       }
-      const sessionId = crypto.randomUUID();
-      activeSessionId = sessionId;
-      socketState = 'active';
-      broadcastStateChange();
-      send({
-        type: 'DAPP_RESPONSE',
-        requestId,
-        payload: { type: 'GSD_RESPONSE', requestId, result: sessionId },
+      const socketRequestId = crypto.randomUUID();
+      const origin = payload.origin ?? 'gsd-connect';
+      const timer = setTimeout(() => {
+        if (pendingSocketRequests.has(socketRequestId)) {
+          pendingSocketRequests.delete(socketRequestId);
+          send({
+            type: 'DAPP_RESPONSE',
+            requestId,
+            payload: {
+              type: 'GSD_ERROR',
+              requestId,
+              error: { code: 'Timeout', reason: 'Request timed out' },
+            },
+          });
+        }
+      }, SOCKET_REQUEST_TTL_MS);
+      pendingSocketRequests.set(socketRequestId, { wsRequestId: requestId, timer });
+      self.postMessage({
+        id: null,
+        type: 'SOCKET_DAPP_REQUEST',
+        payload: { socketRequestId, dappPayload: payload, origin },
       });
       return;
     }
@@ -163,28 +180,51 @@ async function handleMessage(raw: string): Promise<void> {
         });
         return;
       }
-      const apiResult = await handleApiCall(payload.method, payload.args);
-      if ('error' in apiResult) {
-        send({
-          type: 'DAPP_RESPONSE',
-          requestId,
-          payload: { type: 'GSD_ERROR', requestId, error: apiResult.error },
-        });
-      } else {
-        send({
-          type: 'DAPP_RESPONSE',
-          requestId,
-          payload: { type: 'GSD_RESPONSE', requestId, result: apiResult.result },
-        });
-      }
+      const socketRequestId = crypto.randomUUID();
+      const timer = setTimeout(() => {
+        if (pendingSocketRequests.has(socketRequestId)) {
+          pendingSocketRequests.delete(socketRequestId);
+          send({
+            type: 'DAPP_RESPONSE',
+            requestId,
+            payload: {
+              type: 'GSD_ERROR',
+              requestId,
+              error: { code: 'Timeout', reason: 'Request timed out' },
+            },
+          });
+        }
+      }, SOCKET_REQUEST_TTL_MS);
+      pendingSocketRequests.set(socketRequestId, { wsRequestId: requestId, timer });
+      self.postMessage({
+        id: null,
+        type: 'SOCKET_DAPP_REQUEST',
+        payload: { socketRequestId, dappPayload: payload, origin: 'gsd-connect' },
+      });
       return;
     }
 
-    // GSD_HINT_USAGE — no-op acknowledgement
-    send({
-      type: 'DAPP_RESPONSE',
-      requestId,
-      payload: { type: 'GSD_RESPONSE', requestId, result: undefined },
+    // GSD_HINT_USAGE — broadcast to background
+    const socketRequestId = crypto.randomUUID();
+    const timer = setTimeout(() => {
+      if (pendingSocketRequests.has(socketRequestId)) {
+        pendingSocketRequests.delete(socketRequestId);
+        send({
+          type: 'DAPP_RESPONSE',
+          requestId,
+          payload: {
+            type: 'GSD_ERROR',
+            requestId,
+            error: { code: 'Timeout', reason: 'Request timed out' },
+          },
+        });
+      }
+    }, SOCKET_REQUEST_TTL_MS);
+    pendingSocketRequests.set(socketRequestId, { wsRequestId: requestId, timer });
+    self.postMessage({
+      id: null,
+      type: 'SOCKET_DAPP_REQUEST',
+      payload: { socketRequestId, dappPayload: payload, origin: 'gsd-connect' },
     });
   }
 }
@@ -193,11 +233,10 @@ function scheduleReconnect(): void {
   if (socketState === 'off') return;
   const delay = Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
   attempt++;
-  emitConnect('debug', `Socket reconnecting in ${delay}ms`, {
-    attempt, delay,
-  });
   reconnectTimer = setTimeout(openSocket, delay);
 }
+
+const CONNECT_TIMEOUT_MS = 10_000;
 
 function openSocket(): void {
   reconnectTimer = null;
@@ -207,7 +246,15 @@ function openSocket(): void {
   // be killed when the wallet blocks SDK connections during stop/restart.
   socket = new OrigWebSocket(targetUrl);
 
+  const connectTimeout = setTimeout(() => {
+    if (socket?.readyState !== WebSocket.OPEN) {
+      emitConnect('warn', `Socket connection timeout (${targetUrl})`, { attempt });
+      socket?.close();
+    }
+  }, CONNECT_TIMEOUT_MS);
+
   socket.onopen = () => {
+    clearTimeout(connectTimeout);
     attempt = 0;
     emitConnect('info', `Socket connected to ${targetUrl}`);
     send({ type: 'CONNECTED' });
@@ -222,29 +269,46 @@ function openSocket(): void {
   };
 
   socket.onclose = (e: CloseEvent) => {
-    emitConnect('info', 'Socket closed', {
-      code: e.code,
-      reason: e.reason || undefined,
-      wasClean: e.wasClean,
-    });
+    clearTimeout(connectTimeout);
     socket = null;
     if (socketState === 'active') {
+      const closedSessionId = activeSessionId;
       activeSessionId = null;
       socketState = 'waiting';
       broadcastStateChange();
+      pendingSocketRequests.clear();
+      if (closedSessionId) {
+        self.postMessage({
+          id: null,
+          type: 'SOCKET_DAPP_REQUEST',
+          payload: {
+            socketRequestId: crypto.randomUUID(),
+            dappPayload: { type: 'GSD_DISCONNECT', sessionId: closedSessionId },
+            origin: 'gsd-connect',
+          },
+        });
+      }
     }
     scheduleReconnect();
   };
 
   socket.onerror = () => {
-    emitConnect('warn', `Socket error (connecting to ${targetUrl})`, {
-      attempt,
-    });
+    clearTimeout(connectTimeout);
     socket?.close();
   };
 }
 
 export function connect(url: string = DEFAULT_URL): void {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+      emitConnect('error', 'Invalid socket URL: must use ws:// or wss://', { url });
+      return;
+    }
+  } catch {
+    emitConnect('error', 'Invalid socket URL', { url });
+    return;
+  }
   targetUrl = url;
   attempt = 0;
   if (reconnectTimer !== null) {
@@ -264,21 +328,36 @@ export function disconnect(): void {
   }
   socketState = 'off';
   activeSessionId = null;
+  pendingSocketRequests.clear();
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
-  socket?.close();
+  const ws = socket;
   socket = null;
+  ws?.close();
   broadcastStateChange();
 }
 
 export function endSession(reason: string): void {
   if (socketState !== 'active') return;
+  const closedSessionId = activeSessionId;
   send({ type: 'SESSION_ENDED', reason });
   activeSessionId = null;
   socketState = 'waiting';
+  pendingSocketRequests.clear();
   broadcastStateChange();
+  if (closedSessionId) {
+    self.postMessage({
+      id: null,
+      type: 'SOCKET_DAPP_REQUEST',
+      payload: {
+        socketRequestId: crypto.randomUUID(),
+        dappPayload: { type: 'GSD_DISCONNECT', sessionId: closedSessionId },
+        origin: 'gsd-connect',
+      },
+    });
+  }
 }
 
 export function getState(): SocketState {
@@ -299,4 +378,41 @@ export function forwardStateUpdate(state: SerializedWalletState): void {
   if (socket?.readyState === WebSocket.OPEN) {
     send({ type: 'STATE_UPDATE', state });
   }
+}
+
+export function deliverResponse(socketRequestId: string, response: unknown): boolean {
+  const entry = pendingSocketRequests.get(socketRequestId);
+  if (!entry) return false;
+  pendingSocketRequests.delete(socketRequestId);
+  clearTimeout(entry.timer);
+
+  const resp = response as Record<string, unknown>;
+  if (resp?.['type'] === 'GSD_ERROR') {
+    send({
+      type: 'DAPP_RESPONSE',
+      requestId: entry.wsRequestId,
+      payload: {
+        type: 'GSD_ERROR',
+        requestId: entry.wsRequestId,
+        error: resp['error'] as { code: string; reason: string },
+      },
+    });
+  } else {
+    send({
+      type: 'DAPP_RESPONSE',
+      requestId: entry.wsRequestId,
+      payload: {
+        type: 'GSD_RESPONSE',
+        requestId: entry.wsRequestId,
+        result: resp?.['result'],
+      },
+    });
+  }
+  return true;
+}
+
+export function setActiveSession(sessionId: string): void {
+  activeSessionId = sessionId;
+  socketState = 'active';
+  broadcastStateChange();
 }

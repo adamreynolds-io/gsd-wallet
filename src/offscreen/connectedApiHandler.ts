@@ -61,6 +61,26 @@ export function setCallContext(key: string, value: unknown): void {
   callContext[key] = value;
 }
 
+const TX_METHODS = new Set([
+  'submitTransaction',
+  'balanceUnsealedTransaction',
+  'balanceSealedTransaction',
+  'makeTransfer',
+]);
+
+function emitFailedTxData(method: string, args: unknown[]): void {
+  if (TX_METHODS.has(method) && typeof args[0] === 'string') {
+    emit('debug', 'tx', `${method}: failed tx data`, {
+      method,
+      hexLength: args[0].length,
+      hexPreview: hexPreview(args[0]),
+      txHex: args[0],
+    });
+  }
+}
+
+const TX_HEARTBEAT_MS = 10_000;
+
 export async function handleApiCall(
   method: string,
   args: unknown[],
@@ -69,12 +89,24 @@ export async function handleApiCall(
   callContext = {};
   emit('info', 'api', `${method} called`, { method, args: args.map((a) => typeof a === 'string' ? hexPreview(a) : a) });
 
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
+  if (TX_METHODS.has(method)) {
+    emit('debug', 'tx', `${method}: processing — heartbeats pause during CPU-bound WASM steps`, { method });
+    heartbeat = setInterval(() => {
+      const elapsed = Math.round((Date.now() - t0) / 1000);
+      emit('debug', 'tx', `${method}: still processing (${elapsed}s)`, {
+        method, elapsed,
+      });
+    }, TX_HEARTBEAT_MS);
+  }
+
   try {
     await walletManager.waitForReady();
 
     const result = await handleApiCallInner(method, args);
 
     if ('error' in result) {
+      emitFailedTxData(method, args);
       emit('warn', 'api', `${method} returned error`, { method, error: result.error, ...callContext }, Date.now() - t0);
     } else {
       emit('info', 'api', `${method} completed`, { method, ...callContext }, Date.now() - t0);
@@ -82,11 +114,14 @@ export async function handleApiCall(
     return result;
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
+    emitFailedTxData(method, args);
     emit('error', 'error', `${method} threw`, { method, error: reason }, Date.now() - t0);
     if (e && typeof e === 'object' && 'code' in e && 'reason' in e) {
       return { error: e as { code: string; reason: string } };
     }
     return err('InternalError', reason);
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
   }
 }
 
