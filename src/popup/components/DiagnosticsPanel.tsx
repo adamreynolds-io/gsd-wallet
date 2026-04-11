@@ -289,27 +289,39 @@ function EventRow({ event, expandCollapseSignal, onInspect }: {
 
   const links = extractLinks(event.data, onInspect);
 
-  const txHex = event.data && typeof event.data === 'object' && 'txHex' in event.data
-    ? (event.data as Record<string, unknown>)['txHex'] as string
+  const failedTxData = event.data && typeof event.data === 'object' && 'txHex' in event.data
+    ? (event.data as Record<string, unknown>)
     : null;
-  const hasTxHex = typeof txHex === 'string' && txHex.length > 0;
+  const hasFailedTxData = failedTxData !== null
+    && typeof failedTxData['txHex'] === 'string'
+    && (failedTxData['txHex'] as string).length > 0;
 
-  const downloadTxBlob = useCallback(() => {
-    if (!txHex) return;
-    const clean = txHex.startsWith('0x') ? txHex.slice(2) : txHex;
-    if (clean.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(clean)) return;
-    const bytes = new Uint8Array(clean.length / 2);
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-    }
-    const blob = new Blob([bytes], { type: 'application/octet-stream' });
+  const downloadFailedTx = useCallback(() => {
+    if (!failedTxData) return;
+    const diagnostic = {
+      version: 1,
+      timestamp: new Date(event.timestamp).toISOString(),
+      method: failedTxData['method'] ?? null,
+      markers: failedTxData['markers'] ?? null,
+      txHex: failedTxData['txHex'] ?? null,
+      ledgerParamsHex: failedTxData['ledgerParamsHex'] ?? null,
+      error: failedTxData['error'] ?? null,
+      versions: {
+        ...(failedTxData['versions'] as Record<string, string> ?? {}),
+        gsdWallet: chrome.runtime.getManifest().version,
+      },
+    };
+    const blob = new Blob(
+      [JSON.stringify(diagnostic, null, 2)],
+      { type: 'application/json' },
+    );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `failed-tx-${event.id}.bin`;
+    a.download = `failed-tx-${event.id}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [txHex, event.id]);
+  }, [failedTxData, event.id, event.timestamp]);
 
   return (
     <div className="border-b border-midnight-800 hover:bg-midnight-800/50">
@@ -345,7 +357,7 @@ function EventRow({ event, expandCollapseSignal, onInspect }: {
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
         </button>
       </div>
-      {(links.length > 0 || hasTxHex) && (
+      {(links.length > 0 || hasFailedTxData) && (
         <div className="flex flex-wrap gap-1 px-2 pb-0.5 pl-[88px]">
           {links.map((tag, i) => (
             <button
@@ -357,14 +369,14 @@ function EventRow({ event, expandCollapseSignal, onInspect }: {
               {tag.label}
             </button>
           ))}
-          {hasTxHex && (
+          {hasFailedTxData && (
             <button
-              onClick={(e) => { e.stopPropagation(); downloadTxBlob(); }}
+              onClick={(e) => { e.stopPropagation(); downloadFailedTx(); }}
               className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 hover:text-white flex items-center gap-0.5"
-              title="Download failed transaction as binary"
+              title="Download failed transaction diagnostic JSON"
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-              tx.bin
+              tx.json
             </button>
           )}
         </div>
@@ -435,7 +447,7 @@ function ValueRenderer({ keyName, value, onInspect }: {
   return <span className="break-all">{JSON.stringify(value)}</span>;
 }
 
-const HIDDEN_DATA_KEYS = new Set(['txHex']);
+const HIDDEN_DATA_KEYS = new Set(['txHex', 'ledgerParamsHex']);
 
 function DataRenderer({ data, onInspect }: { data: unknown; onInspect?: (target: InspectorTarget) => void }) {
   if (typeof data !== 'object' || data === null) {

@@ -13,6 +13,13 @@ const facadePkg = JSON.parse(
   ),
 ) as { version: string };
 
+const ledgerPkg = JSON.parse(
+  readFileSync(
+    resolve(__dirname, 'node_modules/@midnight-ntwrk/ledger-v8/package.json'),
+    'utf-8',
+  ),
+) as { version: string };
+
 export default defineConfig({
   plugins: [wasm(), react(), crx({ manifest })],
   resolve: {
@@ -28,6 +35,8 @@ export default defineConfig({
   define: {
     'global': 'globalThis',
     '__SDK_FACADE_VERSION__': JSON.stringify(facadePkg.version),
+    '__LEDGER_VERSION__': JSON.stringify(ledgerPkg.version),
+    '__GSD_WALLET_VERSION__': JSON.stringify(manifest.version),
   },
   build: {
     target: 'es2022',

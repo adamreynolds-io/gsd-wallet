@@ -27,8 +27,8 @@ Download `dist.zip` from the [latest release](https://github.com/adamreynolds-io
 **Option B — build from source:**
 
 ```bash
-npm install
-npm run build
+pnpm install
+pnpm build
 ```
 
 Load `dist/` as above.
@@ -54,7 +54,7 @@ Load `dist/` as above.
 - **Persistent diagnostics** — 2000-event ring buffer persisted to `chrome.storage.local`; survives extension reloads and SW restarts
 - **Filterable event stream** — filter by level (DBG/INF/WRN/ERR) and category (SW/Wallet/State/Sync/SDK/DApp/API/Pop/Tx/Idx/Sto/Err/Conn)
 - **Log export** — download all diagnostic events as NDJSON with ISO timestamps
-- **Failed tx download** — when a transaction fails, download the raw tx bytes as `.bin` for offline debugging
+- **Failed tx download** — when a transaction fails, download a self-contained JSON diagnostic file with full tx hex, deserialization markers, ledger params, error details, and package versions
 - **TX heartbeat** — 10s liveness heartbeats during long-running operations; pauses during CPU-bound WASM steps
 - **Debug tabs** — real-time sync progress, UTXO inspection, token balances per subsystem, transaction history
 - **Built-in explorer** — query the v4 indexer for transaction, block, and contract details
@@ -162,15 +162,15 @@ Transactions in the wallet serialize through a single queue — only one transac
 ### Localnet
 
 ```bash
-npm run localnet:up    # starts node + indexer + proof server
+pnpm localnet:up    # starts node + indexer + proof server
 ```
 
 Select "Undeployed" environment, click W0 to import the genesis wallet with all minted NIGHT, deploy and test your contracts.
 
 ```bash
-npm run localnet:down  # stop all services
-npm run localnet:logs  # tail service logs
-npm run localnet:reset # nuke volumes and restart fresh
+pnpm localnet:down  # stop all services
+pnpm localnet:logs  # tail service logs
+pnpm localnet:reset # nuke volumes and restart fresh
 ```
 
 ### Testnet / Mainnet
@@ -253,7 +253,6 @@ All operations that a production wallet would prompt the user for (connection ap
 
 ## Known issues
 
-- **Contract call transactions fail in Chrome** — `balanceUnsealedTransaction` fails with `IntentSegmentIdCollision` for contract call transactions in the Chrome extension context. The same code path succeeds in Node.js. Deploy transactions work fine. This is an upstream SDK/ledger issue — no workaround exists for dApp developers. See [#45](https://github.com/adamreynolds-io/gsd-wallet/issues/45).
 - **Mainnet RPC disconnects** — The mainnet RPC node periodically drops WebSocket connections with `1000: Normal Closure`. The SDK reconnects automatically but sync can stall temporarily.
 - **First mainnet sync takes ~3 min** — ~89k shielded + ~89k dust events replayed from the bundled cache snapshot. Was 6+ min from indexer. Subsequent opens resume from per-wallet checkpoints.
 

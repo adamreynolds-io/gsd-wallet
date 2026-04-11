@@ -5,6 +5,12 @@ import { getEnvironmentConfig } from '@shared/environments';
 import { bytesToHex, hexToBytes } from '@shared/hexUtils';
 import { emit } from './diagnosticLogger';
 
+declare const __SDK_FACADE_VERSION__: string;
+declare const __LEDGER_VERSION__: string;
+declare const __GSD_WALLET_VERSION__: string;
+
+let ledgerModule: typeof import('@midnight-ntwrk/ledger-v8') | undefined;
+
 // Yield to the event loop between heavy SDK operations so Chrome
 // doesn't flag the offscreen document as unresponsive.
 const yieldToEventLoop = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -55,14 +61,61 @@ const TX_METHODS = new Set([
   'makeTransfer',
 ]);
 
-function emitFailedTxData(method: string, args: unknown[]): void {
-  if (TX_METHODS.has(method) && typeof args[0] === 'string') {
-    emit('debug', 'tx', `${method}: failed tx data`, {
-      method,
-      hexLength: args[0].length,
-      hexPreview: hexPreview(args[0]),
-    });
-  }
+const TX_MARKERS: Record<string, {
+  signature: string;
+  proof: string;
+  binding: string;
+}> = {
+  submitTransaction:
+    { signature: 'signature', proof: 'proof', binding: 'binding' },
+  balanceSealedTransaction:
+    { signature: 'signature', proof: 'proof', binding: 'binding' },
+  balanceUnsealedTransaction:
+    { signature: 'signature', proof: 'proof', binding: 'pre-binding' },
+};
+
+function emitFailedTxData(
+  method: string,
+  args: unknown[],
+  error: unknown,
+): void {
+  if (!TX_METHODS.has(method) || typeof args[0] !== 'string') return;
+
+  const txHex = args[0];
+
+  let ledgerParamsHex: string | undefined;
+  try {
+    if (ledgerModule) {
+      const params = ledgerModule.LedgerParameters.initialParameters();
+      ledgerParamsHex = bytesToHex(params.serialize());
+    }
+  } catch { /* best effort */ }
+
+  const errorInfo = error instanceof Error
+    ? { type: error.constructor.name, message: error.message }
+    : error && typeof error === 'object' && 'code' in error
+      ? {
+          type: String((error as Record<string, unknown>)['code']),
+          message: String(
+            (error as Record<string, unknown>)['reason'] ?? error,
+          ),
+        }
+      : { type: 'unknown', message: String(error) };
+
+  emit('debug', 'tx', `${method}: failed tx data`, {
+    method,
+    hexLength: txHex.length,
+    hexPreview: hexPreview(txHex),
+    txHex,
+    markers: TX_MARKERS[method] ?? null,
+    ledgerParamsHex,
+    error: errorInfo,
+    versions: {
+      walletSdk: __SDK_FACADE_VERSION__,
+      ledger: __LEDGER_VERSION__,
+      gsdWallet: __GSD_WALLET_VERSION__,
+    },
+  });
 }
 
 const TX_HEARTBEAT_MS = 10_000;
@@ -93,7 +146,7 @@ export async function handleApiCall(
     const result = await handleApiCallInner(method, args);
 
     if ('error' in result) {
-      emitFailedTxData(method, args);
+      emitFailedTxData(method, args, result.error);
       emit('warn', 'api', `${method} returned error`, { method, error: result.error, ...callContext }, Date.now() - t0);
     } else {
       emit('info', 'api', `${method} completed`, { method, ...callContext }, Date.now() - t0);
@@ -101,7 +154,7 @@ export async function handleApiCall(
     return result;
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
-    emitFailedTxData(method, args);
+    emitFailedTxData(method, args, e);
     emit('error', 'error', `${method} threw`, { method, error: reason }, Date.now() - t0);
     if (e && typeof e === 'object' && 'code' in e && 'reason' in e) {
       return { error: e as { code: string; reason: string } };
@@ -202,6 +255,7 @@ async function handleApiCallInner(
       emit('warn', 'tx', 'BYPASS: auto-submitting transaction (production wallet would show confirmation dialog)', { hexLength: txHex.length });
       emit('info', 'tx', 'submitTransaction: deserializing', { hexLength: txHex.length });
       const ledger = await import('@midnight-ntwrk/ledger-v8');
+      ledgerModule = ledger;
       const txBytes = hexToBytes(txHex);
       const tx = ledger.Transaction.deserialize(
         'signature', 'proof', 'binding', txBytes,
@@ -224,6 +278,7 @@ async function handleApiCallInner(
 
       emit('info', 'tx', 'balanceUnsealed: deserializing', { hexLength: txHex.length });
       const ledger = await import('@midnight-ntwrk/ledger-v8');
+      ledgerModule = ledger;
       const txBytes = hexToBytes(txHex);
       const tx = ledger.Transaction.deserialize(
         'signature', 'proof', 'pre-binding', txBytes,
@@ -289,6 +344,7 @@ async function handleApiCallInner(
 
       emit('info', 'tx', 'balanceSealed: deserializing', { hexLength: txHex.length });
       const ledger = await import('@midnight-ntwrk/ledger-v8');
+      ledgerModule = ledger;
       const txBytes = hexToBytes(txHex);
       const tx = ledger.Transaction.deserialize(
         'signature', 'proof', 'binding', txBytes,
