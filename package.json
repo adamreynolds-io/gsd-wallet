@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "preview": "vite preview",
     "localnet:up": "docker compose up -d --wait",
     "localnet:down": "docker compose down",
@@ -20,8 +21,8 @@
     "@midnight-ntwrk/wallet-sdk-facade": "3.0.0",
     "@midnight-ntwrk/wallet-sdk-hd": "3.0.1",
     "@scure/bip39": "2.0.1",
-    "assert": "^2.1.0",
-    "buffer": "^6.0.3",
+    "assert": "2.1.0",
+    "buffer": "6.0.3",
     "idb": "8.0.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -31,17 +32,19 @@
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "2.4.0",
-    "@tailwindcss/postcss": "^4.2.2",
+    "@tailwindcss/postcss": "4.2.2",
     "@types/chrome": "0.1.38",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.1",
     "autoprefixer": "10.4.27",
+    "fast-check": "4.6.0",
     "postcss": "8.5.8",
     "tailwindcss": "4.2.2",
     "typescript": "6.0.2",
     "vite": "8.0.3",
-    "vite-plugin-wasm": "^3.6.0"
+    "vite-plugin-wasm": "3.6.0",
+    "vitest": "4.1.4"
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

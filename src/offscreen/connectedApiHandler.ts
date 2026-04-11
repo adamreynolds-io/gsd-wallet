@@ -2,6 +2,7 @@ import { MidnightBech32m, DustAddress } from '@midnight-ntwrk/wallet-sdk-address
 import type * as ledgerTypes from '@midnight-ntwrk/ledger-v8';
 import * as walletManager from './walletManager';
 import { getEnvironmentConfig } from '@shared/environments';
+import { bytesToHex, hexToBytes } from '@shared/hexUtils';
 import { emit } from './diagnosticLogger';
 
 // Yield to the event loop between heavy SDK operations so Chrome
@@ -26,20 +27,6 @@ function requireWallet() {
   return wallet;
 }
 
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
-  const bytes = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
-}
 
 function serializeBigIntRecord(record: Record<string, bigint>): Record<string, string> {
   const result: Record<string, string> = {};
@@ -53,12 +40,12 @@ function hexPreview(hex: string): string {
   return hex.length > 64 ? `${hex.slice(0, 64)}... (${hex.length} chars)` : hex;
 }
 
-// Shared context for the current API call — allows inner functions to
-// pass metadata (like txHash) up to the outer completion event.
-let callContext: Record<string, unknown> = {};
+// Per-call context — allows inner functions to pass metadata (like txHash)
+// up to the outer completion event. Thread-local to each handleApiCall.
+let activeCallContext: Record<string, unknown> = {};
 
 export function setCallContext(key: string, value: unknown): void {
-  callContext[key] = value;
+  activeCallContext[key] = value;
 }
 
 const TX_METHODS = new Set([
@@ -74,7 +61,6 @@ function emitFailedTxData(method: string, args: unknown[]): void {
       method,
       hexLength: args[0].length,
       hexPreview: hexPreview(args[0]),
-      txHex: args[0],
     });
   }
 }
@@ -86,7 +72,8 @@ export async function handleApiCall(
   args: unknown[],
 ): Promise<ApiResult> {
   const t0 = Date.now();
-  callContext = {};
+  const callContext: Record<string, unknown> = {};
+  activeCallContext = callContext;
   emit('info', 'api', `${method} called`, { method, args: args.map((a) => typeof a === 'string' ? hexPreview(a) : a) });
 
   let heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -223,7 +210,7 @@ async function handleApiCallInner(
       const submitT0 = Date.now();
       const submittedTxId = await facade.submitTransaction(tx);
       const txHashStr = String(submittedTxId ?? '');
-      callContext['txHash'] = txHashStr;
+      setCallContext('txHash', txHashStr);
       emit('info', 'tx', 'submitTransaction: submitted', { txHash: txHashStr }, Date.now() - submitT0);
       return ok(txHashStr);
     }
@@ -408,7 +395,11 @@ async function handleApiCallInner(
       if (options.encoding === 'hex') {
         dataBytes = hexToBytes(data);
       } else if (options.encoding === 'base64') {
-        dataBytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        try {
+          dataBytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        } catch {
+          return err('InvalidInput', 'Invalid base64 data');
+        }
       } else {
         dataBytes = new TextEncoder().encode(data);
       }

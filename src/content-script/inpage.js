@@ -23,7 +23,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;   // 30 seconds
 
 function sendRequest(payload) {
   return new Promise((resolve, reject) => {
-    const requestId = `gsd-${Date.now()}-${++requestCounter}`;
+    const requestId = `gsd-${crypto.randomUUID()}`;
     const method = payload.method;
     const timeoutMs = method && SLOW_METHODS.has(method)
       ? SLOW_TIMEOUT_MS
@@ -59,7 +59,7 @@ function sendRequest(payload) {
     }
 
     window.addEventListener('message', handleResponse);
-    window.postMessage({ source: INPAGE_SOURCE, requestId, payload }, '*');
+    window.postMessage({ source: INPAGE_SOURCE, requestId, payload }, window.location.origin);
   });
 }
 

@@ -16,13 +16,10 @@ const buffer: DiagnosticEvent[] = [];
 const listeners: Array<(event: DiagnosticEvent) => void> = [];
 
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingSince = 0;
+let unflushedCount = 0;
 
 function scheduleFlush(): void {
-  if (!pendingSince) {
-    pendingSince = buffer.length;
-  }
-  if (buffer.length - pendingSince >= FLUSH_BATCH_SIZE) {
+  if (unflushedCount >= FLUSH_BATCH_SIZE) {
     flush();
     return;
   }
@@ -36,7 +33,7 @@ function flush(): void {
     clearTimeout(flushTimer);
     flushTimer = null;
   }
-  pendingSince = 0;
+  unflushedCount = 0;
   chrome.storage.local.set({ [STORAGE_KEY]: buffer });
 }
 
@@ -60,6 +57,7 @@ export function emit(
   if (buffer.length > MAX_EVENTS) {
     buffer.splice(0, buffer.length - MAX_EVENTS);
   }
+  unflushedCount++;
   scheduleFlush();
   for (const listener of listeners) {
     try {

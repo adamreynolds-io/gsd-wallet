@@ -12,7 +12,7 @@ import {
   explorerBlockUrl,
   explorerContractUrl,
 } from '@shared/environments';
-import { DUST_DENOMINATION } from '@shared/constants';
+import { formatDustBalance } from '@core/balanceUtils';
 import type { Environment, InspectorTarget } from '@shared/types';
 
 interface InspectorProps {
@@ -547,16 +547,7 @@ function isContractDetail(d: unknown): d is ContractDetail {
 
 function formatDust(value: string): string {
   try {
-    const n = BigInt(value);
-    const whole = n / DUST_DENOMINATION;
-    const frac = n % DUST_DENOMINATION;
-    if (frac === 0n) return whole.toLocaleString('en-US');
-    const fracStr = frac
-      .toString()
-      .padStart(15, '0')
-      .replace(/0+$/, '')
-      .slice(0, 4);
-    return `${whole.toLocaleString('en-US')}.${fracStr}`;
+    return formatDustBalance(BigInt(value));
   } catch {
     return value;
   }

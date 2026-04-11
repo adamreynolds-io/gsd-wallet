@@ -12,6 +12,8 @@ import {
 } from '@midnight-ntwrk/wallet-sdk-address-format';
 import type { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
 import type { TransactionResult } from '@shared/types';
+import { validateAddress } from '@core/addressValidation';
+import { TX_TTL_MS } from '@shared/constants';
 
 export interface TransferParams {
   tokenType: 'shielded' | 'unshielded';
@@ -33,7 +35,12 @@ export async function executeTransfer(
   unshieldedKeystore?: UnshieldedKeystore,
 ): Promise<TransactionResult> {
   try {
-    const ttl = new Date(Date.now() + 30 * 60 * 1000);
+    const addrResult = validateAddress(params.receiverAddress, params.tokenType, networkId);
+    if (!addrResult.valid) {
+      return { success: false, error: addrResult.error };
+    }
+
+    const ttl = new Date(Date.now() + TX_TTL_MS);
 
     const parsedAddress = MidnightBech32m.parse(params.receiverAddress);
     const transfer: CombinedTokenTransfer =
@@ -72,6 +79,9 @@ export async function executeTransfer(
     );
 
     let signedRecipe: BalancingRecipe = recipe;
+    if (params.tokenType === 'unshielded' && !unshieldedKeystore) {
+      return { success: false, error: 'Unshielded keystore required for unshielded transfer' };
+    }
     if (unshieldedKeystore) {
       signedRecipe = await facade.signRecipe(recipe, (payload) =>
         unshieldedKeystore.signData(payload),

@@ -9,6 +9,7 @@ import {
   NIGHT_DENOMINATION,
   DUST_DENOMINATION,
 } from '@shared/constants';
+import { formatBalance } from '@core/balanceUtils';
 import type {
   SerializedWalletState,
   SerializedUtxo,
@@ -19,6 +20,14 @@ import type {
 
 type DebugTab = 'dust' | 'shielded' | 'unshielded' | 'txns';
 
+
+function safeBigInt(value: string): bigint {
+  try {
+    return BigInt(value);
+  } catch {
+    return 0n;
+  }
+}
 
 const isFullTab = window.innerWidth > 800;
 
@@ -100,9 +109,10 @@ export function Dashboard() {
     port.onMessage.addListener((msg) => {
       if (msg.type === 'TX_HISTORY') {
         setTxHistory(msg.entries);
+        port.disconnect();
       }
-      port.disconnect();
     });
+    return () => { port.disconnect(); };
   }, [walletState?.status]);
 
   const storeEnv = usePopupStore((s) => s.environment);
@@ -148,6 +158,11 @@ export function Dashboard() {
           <div className="bg-amber-900/60 border border-amber-600/40 text-amber-200 text-xs px-2 py-0.5 text-center rounded">
             Dev wallet — seeds unencrypted
           </div>
+          {!state.isSynced && state.status !== 'initializing' && (
+            <div className="bg-blue-900/60 border border-blue-600/40 text-blue-200 text-xs px-2 py-0.5 text-center rounded">
+              Balances may be incomplete — sync {state.overallSyncPercent}%
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-1.5">
             <div className="bg-midnight-600 rounded px-2 py-1">
@@ -159,7 +174,7 @@ export function Dashboard() {
             <div className="bg-midnight-600 rounded px-2 py-1">
               <div className="text-[10px] uppercase tracking-wider text-gray-500">DUST</div>
               <div className="text-sm font-mono text-white truncate" title={formatBigInt(dustBal, DUST_DENOMINATION)}>
-                {formatLargeNumber(BigInt(dustBal), DUST_DENOMINATION)}
+                {formatLargeNumber(safeBigInt(dustBal), DUST_DENOMINATION)}
               </div>
             </div>
           </div>
@@ -337,31 +352,6 @@ function AddrRow({ label, address }: {
   );
 }
 
-/* ── Token rows ── */
-
-function TokenRows({ label, balances }: { label: string; balances: Record<string, string> }) {
-  const entries = Object.entries(balances).filter(([, v]) => v !== '0');
-  if (entries.length === 0) return null;
-  return (
-    <div>
-      <div className="text-xs uppercase tracking-wider text-gray-500 mb-0.5">{label}</div>
-      {entries.map(([tokenId, amount]) => {
-        const isNight = tokenId === NIGHT_TOKEN_ID;
-        return (
-          <div key={tokenId} className="flex justify-between text-sm px-1">
-            <span className="text-gray-400 font-mono truncate mr-2">
-              {isNight ? 'NIGHT' : `${tokenId.slice(0, 8)}...`}
-            </span>
-            <span className="text-white font-mono">
-              {isNight ? formatBigInt(amount, NIGHT_DENOMINATION) : amount}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 /* ── Debug tabs ── */
 
 function SyncStatusBar({ state }: { state: SerializedWalletState }) {
@@ -419,7 +409,7 @@ function DustDebug({ state }: {
 }) {
   return (
     <div className="space-y-1">
-      <KV k="Balance" v={formatLargeNumber(BigInt(state.dust.balance), DUST_DENOMINATION)} />
+      <KV k="Balance" v={formatLargeNumber(safeBigInt(state.dust.balance), DUST_DENOMINATION)} />
       <KV k="Address" v={trunc(state.dust.address)} />
       <Divider label={`UTXOs (${state.unshielded.utxos.length})`} />
       <UtxoList utxos={state.unshielded.utxos} />
@@ -438,7 +428,7 @@ function ShieldedDebug({ state }: { state: SerializedWalletState }) {
       ) : entries.map(([id, amt]) => (
         <KV key={id}
           k={id === NIGHT_TOKEN_ID ? 'NIGHT' : `${id.slice(0, 10)}...`}
-          v={id === NIGHT_TOKEN_ID ? formatLargeNumber(BigInt(amt), NIGHT_DENOMINATION) : amt}
+          v={id === NIGHT_TOKEN_ID ? formatLargeNumber(safeBigInt(amt), NIGHT_DENOMINATION) : amt}
         />
       ))}
     </div>
@@ -462,7 +452,7 @@ function UnshieldedDebug({ state }: {
       ) : entries.map(([id, amt]) => (
         <KV key={id}
           k={id === NIGHT_TOKEN_ID ? 'NIGHT' : `${id.slice(0, 10)}...`}
-          v={id === NIGHT_TOKEN_ID ? formatLargeNumber(BigInt(amt), NIGHT_DENOMINATION) : amt}
+          v={id === NIGHT_TOKEN_ID ? formatLargeNumber(safeBigInt(amt), NIGHT_DENOMINATION) : amt}
         />
       ))}
       <Divider label={`UTXOs (${state.unshielded.utxos.length})`} />
@@ -514,7 +504,7 @@ function UtxoList({ utxos }: {
             </span>
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="font-mono text-white">
-                {formatLargeNumber(BigInt(utxo.value), NIGHT_DENOMINATION)}
+                {formatLargeNumber(safeBigInt(utxo.value), NIGHT_DENOMINATION)}
               </span>
               <span className={`text-xs px-1 rounded ${utxo.registered ? 'bg-green-900/40 text-green-400' : 'bg-gray-700 text-gray-500'}`}
                 title={utxo.registered ? 'Registered for dust generation' : 'Not registered'}>
@@ -574,27 +564,11 @@ function formatTime(ts: number): string {
 }
 
 function formatBigInt(value: string, denomination: bigint): string {
-  const num = BigInt(value);
-  const whole = num / denomination;
-  const frac = num % denomination;
-  if (frac === 0n) return whole.toLocaleString('en-US');
-  const fracStr = frac.toString().padStart(denomination.toString().length - 1, '0').replace(/0+$/, '');
-  return `${whole.toLocaleString('en-US')}.${fracStr}`;
+  return formatBalance(safeBigInt(value), denomination);
 }
 
 function formatLargeNumber(value: bigint, denomination: bigint): string {
-  const whole = value / denomination;
-  const frac = value % denomination;
-  if (frac === 0n) return fmtSuffix(whole);
-  const fracStr = frac.toString().padStart(denomination.toString().length - 1, '0').replace(/0+$/, '').slice(0, 4);
-  return `${fmtSuffix(whole)}.${fracStr}`;
-}
-
-function fmtSuffix(n: bigint): string {
-  if (n >= 1_000_000_000_000n) return `${(Number(n) / 1e12).toFixed(2)}T`;
-  if (n >= 1_000_000_000n) return `${(Number(n) / 1e9).toFixed(2)}B`;
-  if (n >= 1_000_000n) return `${(Number(n) / 1e6).toFixed(2)}M`;
-  return n.toLocaleString('en-US');
+  return formatBalance(value, denomination);
 }
 
 function StatusDot({ label, ok }: { label: string; ok: boolean }) {
@@ -657,7 +631,6 @@ function SyncDetailRow({ label, color, progress, percent }: {
   progress: SyncProgress;
   percent: number;
 }) {
-  const done = percent === 100 && progress.highest > 0 && progress.applied >= progress.highest;
   return (
     <div
       className="flex-1 flex items-center justify-between text-xs"
@@ -668,16 +641,5 @@ function SyncDetailRow({ label, color, progress, percent }: {
         {abbreviateCount(progress.applied)} / {abbreviateCount(progress.highest)}
       </span>
     </div>
-  );
-}
-
-
-
-function Spinner() {
-  return (
-    <svg className="animate-spin h-5 w-5 mr-2 text-accent-purple" viewBox="0 0 24 24" fill="none">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
   );
 }

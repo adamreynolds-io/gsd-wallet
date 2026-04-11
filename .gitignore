@@ -3,6 +3,6 @@ dist/
 .DS_Store
 .gitnexus
 
-dist.crx
-dist.pem
-dist.zip
+*.crx
+*.pem
+*.zip

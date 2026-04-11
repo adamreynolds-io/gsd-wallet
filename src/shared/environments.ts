@@ -15,13 +15,6 @@ export const ENVIRONMENT_OPTIONS: Array<{
   { label: 'Undeployed', value: 'undeployed' },
 ];
 
-export function deriveIndexerWsUrl(httpUrl: string): string {
-  const wsUrl = httpUrl
-    .replace(/^https:\/\//, 'wss://')
-    .replace(/^http:\/\//, 'ws://');
-  return wsUrl.endsWith('/ws') ? wsUrl : `${wsUrl}/ws`;
-}
-
 export const ENVIRONMENTS: Record<Environment, EnvironmentConfig> = {
   mainnet: {
     networkId: NetworkId.NetworkId.MainNet,

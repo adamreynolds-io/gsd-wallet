@@ -41,6 +41,16 @@ export type ScanResponse =
 
 async function handleScan(request: ScanRequest): Promise<void> {
   const { type, network, networkId, seed, fromId, toId } = request;
+
+  if (!network || !networkId || !seed || seed.length === 0) {
+    const response: ScanResponse = {
+      type: 'ERROR',
+      error: `Invalid scan request: missing required fields`,
+    };
+    self.postMessage(response);
+    return;
+  }
+
   console.log(`[scanWorker] Scanning ${type} events ${fromId}→${toId} on ${network}`);
 
   if (type === 'zswap') {

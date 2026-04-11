@@ -89,6 +89,10 @@ export async function fetchTxDetail(
   }
 
   const json = await resp.json();
+  if (json?.errors?.length) {
+    console.warn('[GSD Explorer] GraphQL errors:', json.errors);
+    return null;
+  }
   console.log('[GSD Explorer] Response:', JSON.stringify(json).slice(0, 200));
   const txs = json?.data?.transactions;
   if (!txs || txs.length === 0) {
@@ -185,6 +189,10 @@ export async function fetchBlockDetail(
   if (!resp.ok) return null;
 
   const json = await resp.json();
+  if (json?.errors?.length) {
+    console.warn('[GSD Explorer] GraphQL errors:', json.errors);
+    return null;
+  }
   const block = json?.data?.block;
   if (!block) return null;
 
@@ -270,6 +278,10 @@ export async function fetchContractDetail(
   if (!resp.ok) return null;
 
   const json = await resp.json();
+  if (json?.errors?.length) {
+    console.warn('[GSD Explorer] GraphQL errors:', json.errors);
+    return null;
+  }
   const action = json?.data?.contractAction;
   if (!action) return null;
 

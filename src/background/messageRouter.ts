@@ -217,12 +217,16 @@ export function setupMessageRouter(): void {
 
   // Track connected dApp sessions with TTL
   const SESSION_TTL_MS = 30 * 60 * 1000;
-  setInterval(() => {
+  function cleanExpiredSessions(): void {
     const now = Date.now();
     for (const [id, session] of sessions) {
       if (now - session.createdAt > SESSION_TTL_MS) sessions.delete(id);
     }
-  }, 60_000);
+  }
+  chrome.alarms.create('gsd-session-ttl', { periodInMinutes: 1 });
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'gsd-session-ttl') cleanExpiredSessions();
+  });
 
   // One-shot messages (popup checks before port is established)
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -241,7 +245,7 @@ async function isDisclaimerAccepted(): Promise<boolean> {
   return result['gsdDisclaimerAccepted'] === true;
 }
 
-async function handleDappRequest(
+export async function handleDappRequest(
   payload: Record<string, unknown>,
   origin: string,
 ): Promise<unknown> {
@@ -262,7 +266,7 @@ async function handleDappRequest(
     });
     const sessionId = crypto.randomUUID();
     sessions.set(sessionId, {
-      origin: origin ?? (payload['origin'] as string),
+      origin,
       networkId: payload['networkId'] as string,
       createdAt: Date.now(),
     });
@@ -307,13 +311,17 @@ async function handleDappRequest(
     return { type: 'GSD_RESPONSE', result: apiResult.result };
   }
 
+  if (payload['type'] === 'GSD_HINT_USAGE') {
+    return { type: 'GSD_RESPONSE', result: undefined };
+  }
+
   return {
     type: 'GSD_ERROR',
     error: { code: 'InvalidRequest', reason: `Unknown payload type: ${payload['type']}` },
   };
 }
 
-async function handlePopupMessage(
+export async function handlePopupMessage(
   msg: PopupRequest,
   send: SendResponse,
 ): Promise<void> {
@@ -402,6 +410,9 @@ async function handlePopupMessage(
               accountIndex: 0,
               walletName: info.name,
             });
+            send({ type: 'WALLET_SWITCHED', success: true });
+          } else {
+            send({ type: 'ERROR', error: 'Active wallet info not found after switch' });
           }
         } catch (err) {
           send({
@@ -433,6 +444,7 @@ async function handlePopupMessage(
               walletName: swInfo?.name ?? '',
               customUrls: msg.customUrls,
             });
+            send({ type: 'ENVIRONMENT_SWITCHED', success: true });
           } catch (err) {
             send({
               type: 'ERROR',
@@ -497,12 +509,15 @@ async function handlePopupMessage(
         if (entry) {
           const hex = Array.from(entry.seed, (b) => b.toString(16).padStart(2, '0')).join('');
           send({ type: 'WALLET_SEED', seedHex: hex });
+        } else {
+          send({ type: 'ERROR', error: 'Wallet not found' });
         }
         break;
       }
 
       case 'LOCK': {
         await offscreenClient.request('STOP_WALLET', null);
+        sessions.clear();
         stateManager.lock();
         break;
       }
@@ -563,6 +578,7 @@ async function handlePopupMessage(
 
       case 'CLEAR_ALL': {
         await offscreenClient.request('STOP_WALLET', null);
+        sessions.clear();
         await stateManager.clearAll();
         chrome.storage.session.remove(['gsdLastState']);
         chrome.storage.local.remove(['gsdDiagnosticEvents']);

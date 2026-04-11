@@ -2,7 +2,6 @@ import { emit } from './diagnosticLogger';
 
 const REPO_OWNER = 'adamreynolds-io';
 const REPO_NAME = 'gsd-wallet';
-const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const GITHUB_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`;
 
 export interface UpdateInfo {
@@ -85,9 +84,9 @@ function isNewer(latest: string, current: string): boolean {
 }
 
 export function startUpdateChecker(): void {
-  // Check on startup (with a short delay to not block init)
-  setTimeout(() => checkForUpdate(), 5_000);
+  chrome.alarms.create('gsd-update-check', { delayInMinutes: 0.1, periodInMinutes: 240 });
+}
 
-  // Check periodically
-  setInterval(() => checkForUpdate(), CHECK_INTERVAL_MS);
+export function handleUpdateAlarm(): void {
+  checkForUpdate();
 }

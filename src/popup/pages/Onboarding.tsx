@@ -208,9 +208,13 @@ export function Onboarding() {
           <button
             className="btn-primary"
             onClick={async () => {
-              const { words } = await generateSeed();
-              setSeedWords(words);
-              setStep('seed-display');
+              try {
+                const { words } = await generateSeed();
+                setSeedWords(words);
+                setStep('seed-display');
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Failed to generate seed');
+              }
             }}
           >
             Generate New Wallet
