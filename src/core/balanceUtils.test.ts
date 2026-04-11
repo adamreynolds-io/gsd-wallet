@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import * as fc from 'fast-check';
 import {
   formatBalance,
   formatBalanceForToken,
@@ -119,5 +120,36 @@ describe('formatDustBalance', () => {
   it('formats fractional DUST', () => {
     const half = DUST_DENOMINATION / 2n;
     expect(formatDustBalance(half)).toBe('0.5');
+  });
+});
+
+describe('formatBalance property-based tests', () => {
+  it('never throws for any non-negative bigint with denomination > 0', () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: 2n ** 64n }),
+        fc.bigInt({ min: 1n, max: 10n ** 18n }),
+        (balance, denomination) => {
+          expect(() => formatBalance(balance, denomination)).not.toThrow();
+        },
+      ),
+    );
+  });
+
+  it('always returns a non-empty string', () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: 2n ** 64n }),
+        fc.bigInt({ min: 1n, max: 10n ** 18n }),
+        (balance, denomination) => {
+          const result = formatBalance(balance, denomination);
+          expect(result.length).toBeGreaterThan(0);
+        },
+      ),
+    );
+  });
+
+  it('formatDustBalance(0n) === "0"', () => {
+    expect(formatDustBalance(0n)).toBe('0');
   });
 });

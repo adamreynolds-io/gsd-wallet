@@ -245,7 +245,7 @@ async function isDisclaimerAccepted(): Promise<boolean> {
   return result['gsdDisclaimerAccepted'] === true;
 }
 
-async function handleDappRequest(
+export async function handleDappRequest(
   payload: Record<string, unknown>,
   origin: string,
 ): Promise<unknown> {
@@ -321,7 +321,7 @@ async function handleDappRequest(
   };
 }
 
-async function handlePopupMessage(
+export async function handlePopupMessage(
   msg: PopupRequest,
   send: SendResponse,
 ): Promise<void> {

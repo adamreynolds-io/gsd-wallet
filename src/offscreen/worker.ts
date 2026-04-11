@@ -31,6 +31,14 @@ import * as connectClient from './connectClient';
 import type { TransferRequest } from '@shared/messages';
 import type { TransactionResult } from '@shared/types';
 
+// Serializes transaction operations so concurrent requests don't race on wallet state
+let txQueue = Promise.resolve();
+function withTxQueue<T>(fn: () => Promise<T>): Promise<T> {
+  const next = txQueue.then(fn, fn);
+  txQueue = next.then(() => {}, () => {});
+  return next;
+}
+
 // Wire diagnostic events to postMessage to main thread and GSD Connect
 setBroadcastFn((event) => {
   self.postMessage({ id: null, type: 'DIAGNOSTIC_EVENT', payload: event });
@@ -96,25 +104,31 @@ async function handleRequest(msg: { id: string; type: string; payload: unknown }
       }
 
       case 'SEND_TRANSFER': {
-        await walletManager.waitForReady();
-        const result = await handleTransfer(data as unknown as TransferRequest);
+        const result = await withTxQueue(async () => {
+          await walletManager.waitForReady();
+          return handleTransfer(data as unknown as TransferRequest);
+        });
         sendResponse(id, result);
         break;
       }
 
       case 'DUST_REGISTER': {
-        await walletManager.waitForReady();
-        const result = await handleDustRegister(
-          data['utxoIds'] as string[],
-          data['receiverAddress'] as string | undefined,
-        );
+        const result = await withTxQueue(async () => {
+          await walletManager.waitForReady();
+          return handleDustRegister(
+            data['utxoIds'] as string[],
+            data['receiverAddress'] as string | undefined,
+          );
+        });
         sendResponse(id, result);
         break;
       }
 
       case 'DUST_DEREGISTER': {
-        await walletManager.waitForReady();
-        const result = await handleDustDeregister(data['utxoIds'] as string[]);
+        const result = await withTxQueue(async () => {
+          await walletManager.waitForReady();
+          return handleDustDeregister(data['utxoIds'] as string[]);
+        });
         sendResponse(id, result);
         break;
       }
