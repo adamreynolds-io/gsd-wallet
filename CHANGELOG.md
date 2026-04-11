@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.0.0
+
+### Code quality
+- **Full codebase review** — 85 findings from 6 parallel review agents, 47 fixes applied
+- **107 unit tests** — vitest + fast-check property-based testing across 9 suites
+- **CI pipeline** — GitHub Actions running typecheck, test, and build on push/PR
+
+### Fixes
+- **Security** — postMessage origin hardened, hex validation, content script payload guards, session origin fix
+- **Correctness** — `switchEnvironment` race condition, `waitForReady` cached rejection, `acceptPort` stale request cleanup, port leak fixes in Dashboard/modals, `SWITCH_WALLET` silent hang
+- **Resilience** — chrome.alarms for SW lifecycle, exponential backoff reconnect, React ErrorBoundary, TX serialization queue, modal timeouts
+
+### Features
+- **Diagnostic tx download** — self-contained JSON with full tx hex, deserialization markers, ledger params, error details, and package versions (replaces broken `.bin` download)
+- **Sync warning banner** — "Balances may be incomplete" shown during catch-up
+- **Architecture docs** — Mermaid diagram, glossary, transaction behavior
+
+### Build
+- **Switch to pnpm** — faster installs, strict dependency isolation, content-addressable store
+- **Pin all dependencies** — exact versions, no `^` ranges
+- **Dead code removed** — unused `inpage.ts`, `displayUtils`, `formatBalanceForToken`, `scanCacheForMatches`, `TokenRows`, `Spinner`
+
+### Dependencies
+- `react-router-dom` 7.13.2 → 7.14.0
+- `@types/chrome` 0.1.38 → 0.1.39
+- `vite` 8.0.3 → 8.0.4
+
 ## 0.9.0
 
 - **DApp connector routing** — socket DAPP_REQUESTs now route through `handleDappRequest()`, sharing session tracking, validation, and logging with browser dApps
