@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "preview": "vite preview",
     "localnet:up": "docker compose up -d --wait",
     "localnet:down": "docker compose down",
@@ -41,7 +42,8 @@
     "tailwindcss": "4.2.2",
     "typescript": "6.0.2",
     "vite": "8.0.3",
-    "vite-plugin-wasm": "3.6.0"
+    "vite-plugin-wasm": "3.6.0",
+    "vitest": "^4.1.4"
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }
