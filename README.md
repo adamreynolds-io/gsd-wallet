@@ -27,8 +27,8 @@ Download `dist.zip` from the [latest release](https://github.com/adamreynolds-io
 **Option B — build from source:**
 
 ```bash
-yarn install
-yarn build
+pnpm install
+pnpm build
 ```
 
 Load `dist/` as above.
@@ -162,15 +162,15 @@ Transactions in the wallet serialize through a single queue — only one transac
 ### Localnet
 
 ```bash
-yarn localnet:up    # starts node + indexer + proof server
+pnpm localnet:up    # starts node + indexer + proof server
 ```
 
 Select "Undeployed" environment, click W0 to import the genesis wallet with all minted NIGHT, deploy and test your contracts.
 
 ```bash
-yarn localnet:down  # stop all services
-yarn localnet:logs  # tail service logs
-yarn localnet:reset # nuke volumes and restart fresh
+pnpm localnet:down  # stop all services
+pnpm localnet:logs  # tail service logs
+pnpm localnet:reset # nuke volumes and restart fresh
 ```
 
 ### Testnet / Mainnet
