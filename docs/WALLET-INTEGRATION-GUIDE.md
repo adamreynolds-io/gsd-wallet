@@ -21,7 +21,7 @@ Before writing code, determine your integration target:
 
 | Platform | Polyfills needed | Storage | DApp Connector | WASM CSP |
 |----------|-----------------|---------|----------------|----------|
-| **Chrome Extension (MV3)** | Buffer, assert, DOM shims | IndexedDB (persistent SDK state + app data) + chrome.storage.session (transient) | Yes (content script + inpage injection) | `wasm-unsafe-eval` in manifest |
+| **Chrome Extension (MV3)** | Buffer, assert, DOM shims | IndexedDB (persistent SDK state + app data) + chrome.storage.session (transient) + chrome.storage.local (diagnostics) | Yes (content script + inpage injection) | `wasm-unsafe-eval` in manifest |
 | **Electron** | None (has Node.js) | Filesystem or IndexedDB | Optional (BrowserWindow injection) | None (Node.js context) |
 | **Node.js (headless)** | None | Filesystem | No | None |
 | **React Native** | **NOT SUPPORTED** | — | — | — |
@@ -772,7 +772,7 @@ SERVICE WORKER:                                               ▼               
   messageRouter ──emit()──→ SW diagnosticLogger               │                        │
                                 │                              │                        │
                                 ├── in-memory buffer           │                        │
-                                ├── chrome.storage.session     │                        │
+                                ├── chrome.storage.local     │                        │
                                 └── merges offscreen events ───┘                        │
                                         │                                               │
                                         └── relay to popup ports ──→ DiagnosticsPanel   │
@@ -780,7 +780,7 @@ SERVICE WORKER:                                               ▼               
                                                                       └── NDJSON export │
 ```
 
-Two diagnostic loggers exist: one in the offscreen document (SDK events, wallet lifecycle) and one in the SW (routing, popup connections). The offscreen logger broadcasts events to the SW over the port. The SW merges both streams and relays to popup ports. Only the SW logger persists to `chrome.storage.session` — the offscreen document does not have access to `chrome.storage` APIs.
+Two diagnostic loggers exist: one in the offscreen document (SDK events, wallet lifecycle) and one in the SW (routing, popup connections). The offscreen logger broadcasts events to the SW over the port. The SW merges both streams and relays to popup ports. Only the SW logger persists to `chrome.storage.local` — the offscreen document does not have access to `chrome.storage` APIs.
 
 ### Event categories
 
@@ -799,7 +799,7 @@ Two diagnostic loggers exist: one in the offscreen document (SDK events, wallet 
 
 ### Persistence
 
-SW-side events are persisted to `chrome.storage.session` via debounced writes. On SW startup, `rehydrate()` restores the buffer. Events are cleared when the browser closes, which is appropriate for diagnostic data.
+SW-side events are persisted to `chrome.storage.local` via debounced writes. On SW startup, `rehydrate()` restores the buffer. Events persist across browser restarts.
 
 Offscreen-side events are kept in-memory only — the offscreen document is persistent, so this is safe during a session. They are broadcast to the SW over the port for relay to the popup. `chrome.storage` APIs are not available in offscreen documents.
 
@@ -841,7 +841,7 @@ This captures errors like `RPC-CORE: subscribeRuntimeVersion(): disconnected fro
 
 ### Diagnostic event flush timing
 
-SW-side events are flushed to `chrome.storage.session` after 100ms or 3 accumulated events, whichever comes first. On SW startup, `rehydrate()` restores persisted events from the previous lifecycle.
+SW-side events are flushed to `chrome.storage.local` after 100ms or 3 accumulated events, whichever comes first. On SW startup, `rehydrate()` restores persisted events from the previous lifecycle.
 
 Offscreen-side events are broadcast immediately to the SW over the port (no batching). The SW relays them to connected popup ports and merges them into its own diagnostic stream.
 
@@ -877,7 +877,7 @@ On mainnet with ~89k shielded and ~89k dust events, first sync takes ~1:49 with 
 | Popup scrolls past bottom | Chrome enforces viewport height limit (~600px) | Cap popup height; offer "Open in Full Tab" |
 | Service worker dies mid-sync | Chrome kills idle SWs after ~30s; WebSockets don't count as activity | Run the SDK in an offscreen document (see section 13). The offscreen is persistent — SW restarts don't affect sync. |
 | Sync restarts from 0 on browser restart | `InMemoryTransactionHistoryStorage` and wallet state are in-memory only | Implement persistent SDK storage with `serializeState()`/`restore()` and `InMemoryTransactionHistoryStorage.serialize()`/`fromSerialized()` (see section 4) |
-| Popup shows stale data after close/reopen | Port message delivery unreliable in MV3 | SW caches state to `chrome.storage.session` on every offscreen broadcast; popup reads cache on connect and watches `chrome.storage.onChanged` as fallback |
+| Popup shows stale data after close/reopen | Port message delivery unreliable in MV3 | SW caches state to `chrome.storage.local` on every offscreen broadcast; popup reads cache on connect and watches `chrome.storage.onChanged` as fallback |
 | Sync percentage inflated (61% shown, actual 43%) | Averaging per-wallet percentages equally | Use `totalApplied / totalHighest` across all wallets |
 | API call hangs after SW restart | `autoUnlock` reinitializes facade while API handler uses old ref | Gate API handlers with `waitForReady()` before using facade |
 | DApp connects before user accepts disclaimer | Popup gate doesn't block service worker DApp handler | Check disclaimer in both popup AND DApp request handler independently |
@@ -929,7 +929,7 @@ The GSD Wallet runs the facade in an offscreen document with the service worker 
 | Message routing (popup + DApp) | `src/background/messageRouter.ts` | `setupMessageRouter()`, `handlePopupMessage()`, `handleDappRequest()` |
 | Offscreen port client | `src/background/offscreenClient.ts` | `acceptPort()`, `request()`, `waitForReady()` |
 | Wallet store CRUD | `src/background/stateManager.ts` | `addWallet()`, `switchWallet()`, `autoUnlock()` |
-| SW diagnostic logger | `src/background/diagnosticLogger.ts` | `emit()`, `rehydrate()` — persists to `chrome.storage.session` |
+| SW diagnostic logger | `src/background/diagnosticLogger.ts` | `emit()`, `rehydrate()` — persists to `chrome.storage.local` |
 | Update checker | `src/background/updateChecker.ts` | `startUpdateChecker()` |
 
 **Offscreen document (SDK host):**
@@ -960,7 +960,7 @@ The GSD Wallet runs the facade in an offscreen document with the service worker 
 
 | Pattern | File |
 |---------|------|
-| DApp connector (inpage) | `src/content-script/inpage.ts` |
+| DApp connector (inpage) | `src/content-script/inpage.js` |
 | Content script bridge | `src/content-script/content-script.ts` |
 | Popup state + reconnection | `src/popup/hooks/useWalletState.ts` |
 | Per-wallet sync progress | `src/popup/pages/Dashboard.tsx` |
@@ -1029,12 +1029,14 @@ The SW maintains a `Map<id, {resolve, reject}>` for pending requests with 120-se
 
 | Component | Location |
 |-----------|----------|
-| `WalletFacade` + all three sub-wallets | Offscreen document |
-| Proving service (`makeServerProvingService`) | Offscreen document |
-| `balanceUnboundTransaction`, `finalizeRecipe`, all transacting | Offscreen document |
-| Sync + state subscriptions + stall detection | Offscreen document |
-| SDK console interception + offscreen diagnostics | Offscreen document |
-| Checkpoint save/load | Offscreen document (IndexedDB is same-origin) |
+| Offscreen relay (port ↔ postMessage bridge) | Offscreen document |
+| `WalletFacade` + all three sub-wallets | Web Worker (spawned by offscreen) |
+| Proving service (`makeServerProvingService`) | Web Worker |
+| `balanceUnboundTransaction`, `finalizeRecipe`, all transacting | Web Worker |
+| Sync + state subscriptions + stall detection | Web Worker |
+| SDK console interception + worker diagnostics | Web Worker |
+| Checkpoint save/load | Web Worker (IndexedDB is same-origin) |
+| GSD Connect (`connectClient`) | Web Worker |
 | Message routing (DApp + popup) | Service worker |
 | DApp session management | Service worker |
 | State cache for popup (`chrome.storage.session`) | Service worker |
@@ -1050,11 +1052,13 @@ The SW maintains a `Map<id, {resolve, reject}>` for pending requests with 120-se
 
 ### Reconnection on SW restart
 
-When Chrome kills and restarts the SW, the offscreen document's port disconnects. The offscreen detects this and reconnects after 500ms:
+When Chrome kills and restarts the SW, the offscreen document's port disconnects. The offscreen detects this and reconnects with exponential backoff (500ms initial, doubling up to 30s):
 
 ```typescript
 port.onDisconnect.addListener(() => {
-  setTimeout(connectToServiceWorker, 500);
+  if (swPort === port) swPort = null;
+  setTimeout(connectToServiceWorker, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
 });
 ```
 
