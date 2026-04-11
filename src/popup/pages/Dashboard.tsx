@@ -9,6 +9,7 @@ import {
   NIGHT_DENOMINATION,
   DUST_DENOMINATION,
 } from '@shared/constants';
+import { formatBalance } from '@core/balanceUtils';
 import type {
   SerializedWalletState,
   SerializedUtxo,
@@ -563,27 +564,11 @@ function formatTime(ts: number): string {
 }
 
 function formatBigInt(value: string, denomination: bigint): string {
-  const num = safeBigInt(value);
-  const whole = num / denomination;
-  const frac = num % denomination;
-  if (frac === 0n) return whole.toLocaleString('en-US');
-  const fracStr = frac.toString().padStart(denomination.toString().length - 1, '0').replace(/0+$/, '');
-  return `${whole.toLocaleString('en-US')}.${fracStr}`;
+  return formatBalance(safeBigInt(value), denomination);
 }
 
 function formatLargeNumber(value: bigint, denomination: bigint): string {
-  const whole = value / denomination;
-  const frac = value % denomination;
-  if (frac === 0n) return fmtSuffix(whole);
-  const fracStr = frac.toString().padStart(denomination.toString().length - 1, '0').replace(/0+$/, '').slice(0, 4);
-  return `${fmtSuffix(whole)}.${fracStr}`;
-}
-
-function fmtSuffix(n: bigint): string {
-  if (n >= 1_000_000_000_000n) return `${(Number(n) / 1e12).toFixed(2)}T`;
-  if (n >= 1_000_000_000n) return `${(Number(n) / 1e9).toFixed(2)}B`;
-  if (n >= 1_000_000n) return `${(Number(n) / 1e6).toFixed(2)}M`;
-  return n.toLocaleString('en-US');
+  return formatBalance(value, denomination);
 }
 
 function StatusDot({ label, ok }: { label: string; ok: boolean }) {

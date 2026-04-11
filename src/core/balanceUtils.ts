@@ -1,19 +1,7 @@
 import {
-  NIGHT_TOKEN_ID,
   NIGHT_DENOMINATION,
   DUST_DENOMINATION,
 } from '@shared/constants';
-
-export function formatBalanceForToken(
-  balance: bigint,
-  tokenId: string,
-  tokenType: 'shielded' | 'unshielded',
-): string {
-  const isNight =
-    tokenType === 'unshielded' && tokenId === NIGHT_TOKEN_ID;
-  const denomination = isNight ? NIGHT_DENOMINATION : 1n;
-  return formatBalance(balance, denomination);
-}
 
 export function formatBalance(
   balance: bigint,

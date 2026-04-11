@@ -2,11 +2,9 @@ import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
 import {
   formatBalance,
-  formatBalanceForToken,
   formatDustBalance,
 } from '@core/balanceUtils';
 import {
-  NIGHT_TOKEN_ID,
   NIGHT_DENOMINATION,
   DUST_DENOMINATION,
 } from '@shared/constants';
@@ -77,34 +75,6 @@ describe('formatBalance', () => {
 
   it('defaults denomination to NIGHT_DENOMINATION', () => {
     expect(formatBalance(2_000_000n)).toBe('2');
-  });
-});
-
-describe('formatBalanceForToken', () => {
-  it('uses NIGHT_DENOMINATION for unshielded NIGHT', () => {
-    expect(
-      formatBalanceForToken(2_000_000n, NIGHT_TOKEN_ID, 'unshielded'),
-    ).toBe('2');
-  });
-
-  it('uses denomination 1n for shielded NIGHT (raw coin units)', () => {
-    // With denomination 1n, 2_000_000 raw units hits the M abbreviation
-    expect(
-      formatBalanceForToken(2_000_000n, NIGHT_TOKEN_ID, 'shielded'),
-    ).toBe('2M');
-  });
-
-  it('uses denomination 1n for shielded NIGHT (below million)', () => {
-    expect(
-      formatBalanceForToken(999_999n, NIGHT_TOKEN_ID, 'shielded'),
-    ).toBe('999,999');
-  });
-
-  it('uses denomination 1n for non-NIGHT token', () => {
-    const otherToken = 'ab'.repeat(32);
-    expect(
-      formatBalanceForToken(500n, otherToken, 'unshielded'),
-    ).toBe('500');
   });
 });
 
