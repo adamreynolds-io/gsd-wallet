@@ -156,6 +156,11 @@ export function Dashboard() {
           <div className="bg-amber-900/60 border border-amber-600/40 text-amber-200 text-xs px-2 py-0.5 text-center rounded">
             Dev wallet — seeds unencrypted
           </div>
+          {!state.isSynced && state.status !== 'initializing' && (
+            <div className="bg-blue-900/60 border border-blue-600/40 text-blue-200 text-xs px-2 py-0.5 text-center rounded">
+              Balances may be incomplete — sync {state.overallSyncPercent}%
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-1.5">
             <div className="bg-midnight-600 rounded px-2 py-1">
