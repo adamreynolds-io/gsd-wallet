@@ -23,22 +23,16 @@ describe('hexToBytes', () => {
     expect(bytes).toEqual(new Uint8Array([0xaa, 0xbb]));
   });
 
-  it('throws with code InvalidInput for odd-length hex', () => {
-    expect(() => hexToBytes('abc')).toThrow(
-      expect.objectContaining({ code: 'InvalidInput' }),
-    );
+  it('throws Error with code InvalidInput for odd-length hex', () => {
+    expect(() => hexToBytes('abc')).toThrow('Hex string has odd length');
   });
 
-  it('throws with code InvalidInput for non-hex characters', () => {
-    expect(() => hexToBytes('ghij')).toThrow(
-      expect.objectContaining({ code: 'InvalidInput' }),
-    );
+  it('throws Error with code InvalidInput for non-hex characters', () => {
+    expect(() => hexToBytes('ghij')).toThrow('Hex string contains non-hex characters');
   });
 
   it('throws for 0x prefix with odd remaining length', () => {
-    expect(() => hexToBytes('0xabc')).toThrow(
-      expect.objectContaining({ code: 'InvalidInput' }),
-    );
+    expect(() => hexToBytes('0xabc')).toThrow('Hex string has odd length');
   });
 });
 

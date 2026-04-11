@@ -31,7 +31,15 @@ function connectPort(): chrome.runtime.Port {
 
   p.onDisconnect.addListener(() => {
     port = null;
-    // Don't reject pending — they'll be resent on reconnect
+    // Resolve pending requests with a disconnect error so inpage.js
+    // surfaces a clear failure instead of hanging indefinitely.
+    for (const [id, resolve] of pendingRequests) {
+      resolve({
+        type: 'GSD_ERROR',
+        error: { code: 'Disconnected', reason: 'Service worker disconnected' },
+      });
+    }
+    pendingRequests.clear();
   });
 
   return p;

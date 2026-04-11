@@ -38,13 +38,13 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.1",
     "autoprefixer": "10.4.27",
-    "fast-check": "^4.6.0",
+    "fast-check": "4.6.0",
     "postcss": "8.5.8",
     "tailwindcss": "4.2.2",
     "typescript": "6.0.2",
     "vite": "8.0.3",
     "vite-plugin-wasm": "3.6.0",
-    "vitest": "^4.1.4"
+    "vitest": "4.1.4"
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

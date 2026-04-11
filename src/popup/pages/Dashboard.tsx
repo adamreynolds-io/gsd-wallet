@@ -111,6 +111,7 @@ export function Dashboard() {
         port.disconnect();
       }
     });
+    return () => { port.disconnect(); };
   }, [walletState?.status]);
 
   const storeEnv = usePopupStore((s) => s.environment);
@@ -562,7 +563,7 @@ function formatTime(ts: number): string {
 }
 
 function formatBigInt(value: string, denomination: bigint): string {
-  const num = BigInt(value);
+  const num = safeBigInt(value);
   const whole = num / denomination;
   const frac = num % denomination;
   if (frac === 0n) return whole.toLocaleString('en-US');

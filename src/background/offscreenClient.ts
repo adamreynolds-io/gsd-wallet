@@ -35,6 +35,13 @@ let isReady = false;
  * Called by the message router when it sees a `gsd-offscreen` port.
  */
 export function acceptPort(incoming: chrome.runtime.Port): void {
+  // Reject any pending requests from the previous port
+  for (const [, entry] of pending) {
+    clearTimeout(entry.timer);
+    entry.reject(new Error('Offscreen document reconnected'));
+  }
+  pending.clear();
+
   port = incoming;
   isReady = false;
   readyPromise = null;
@@ -117,6 +124,7 @@ export function waitForReady(): Promise<void> {
       setTimeout(() => {
         if (!isReady) {
           readyResolve = null;
+          readyPromise = null;
           reject(new Error('Offscreen document did not become ready within 30s'));
         }
       }, READY_TIMEOUT_MS);

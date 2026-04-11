@@ -28,6 +28,7 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [txId, setTxId] = useState<string | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
+  const [activePort, setActivePort] = useState<chrome.runtime.Port | null>(null);
 
   function reset() {
     setStep('type');
@@ -41,6 +42,10 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
   }
 
   function handleClose() {
+    if (activePort) {
+      activePort.disconnect();
+      setActivePort(null);
+    }
     reset();
     onClose();
   }
@@ -76,6 +81,7 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
     setError(null);
 
     const port = chrome.runtime.connect({ name: 'gsd-popup' });
+    setActivePort(port);
     port.postMessage({
       type: 'SEND_TRANSFER',
       params: {
@@ -90,6 +96,7 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
       setResultError('Transfer timed out after 120s');
       setStep('result');
       port.disconnect();
+      setActivePort(null);
     }, 120_000);
 
     port.onMessage.addListener((msg) => {
@@ -102,6 +109,7 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
         }
         setStep('result');
         port.disconnect();
+        setActivePort(null);
       }
     });
   }

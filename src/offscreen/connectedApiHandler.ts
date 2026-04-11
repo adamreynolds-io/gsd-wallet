@@ -40,12 +40,12 @@ function hexPreview(hex: string): string {
   return hex.length > 64 ? `${hex.slice(0, 64)}... (${hex.length} chars)` : hex;
 }
 
-// Shared context for the current API call — allows inner functions to
-// pass metadata (like txHash) up to the outer completion event.
-let callContext: Record<string, unknown> = {};
+// Per-call context — allows inner functions to pass metadata (like txHash)
+// up to the outer completion event. Thread-local to each handleApiCall.
+let activeCallContext: Record<string, unknown> = {};
 
 export function setCallContext(key: string, value: unknown): void {
-  callContext[key] = value;
+  activeCallContext[key] = value;
 }
 
 const TX_METHODS = new Set([
@@ -72,7 +72,8 @@ export async function handleApiCall(
   args: unknown[],
 ): Promise<ApiResult> {
   const t0 = Date.now();
-  callContext = {};
+  const callContext: Record<string, unknown> = {};
+  activeCallContext = callContext;
   emit('info', 'api', `${method} called`, { method, args: args.map((a) => typeof a === 'string' ? hexPreview(a) : a) });
 
   let heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -209,7 +210,7 @@ async function handleApiCallInner(
       const submitT0 = Date.now();
       const submittedTxId = await facade.submitTransaction(tx);
       const txHashStr = String(submittedTxId ?? '');
-      callContext['txHash'] = txHashStr;
+      setCallContext('txHash', txHashStr);
       emit('info', 'tx', 'submitTransaction: submitted', { txHash: txHashStr }, Date.now() - submitT0);
       return ok(txHashStr);
     }
@@ -394,7 +395,11 @@ async function handleApiCallInner(
       if (options.encoding === 'hex') {
         dataBytes = hexToBytes(data);
       } else if (options.encoding === 'base64') {
-        dataBytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        try {
+          dataBytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        } catch {
+          return err('InvalidInput', 'Invalid base64 data');
+        }
       } else {
         dataBytes = new TextEncoder().encode(data);
       }

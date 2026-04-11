@@ -266,7 +266,7 @@ export async function handleDappRequest(
     });
     const sessionId = crypto.randomUUID();
     sessions.set(sessionId, {
-      origin: origin ?? (payload['origin'] as string),
+      origin,
       networkId: payload['networkId'] as string,
       createdAt: Date.now(),
     });
@@ -411,6 +411,8 @@ export async function handlePopupMessage(
               walletName: info.name,
             });
             send({ type: 'WALLET_SWITCHED', success: true });
+          } else {
+            send({ type: 'ERROR', error: 'Active wallet info not found after switch' });
           }
         } catch (err) {
           send({

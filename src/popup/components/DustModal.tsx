@@ -18,6 +18,7 @@ export function DustModal({ open, onClose, mode }: DustModalProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [txId, setTxId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activePort, setActivePort] = useState<chrome.runtime.Port | null>(null);
 
   const isRegister = mode === 'register';
   const title = isRegister ? 'Register for Dust' : 'Deregister from Dust';
@@ -61,6 +62,10 @@ export function DustModal({ open, onClose, mode }: DustModalProps) {
   }
 
   function handleClose() {
+    if (activePort) {
+      activePort.disconnect();
+      setActivePort(null);
+    }
     reset();
     onClose();
   }
@@ -70,6 +75,7 @@ export function DustModal({ open, onClose, mode }: DustModalProps) {
     setError(null);
 
     const port = chrome.runtime.connect({ name: 'gsd-popup' });
+    setActivePort(port);
     const msgType = isRegister ? 'DUST_REGISTER' : 'DUST_DEREGISTER';
     port.postMessage({
       type: msgType,
@@ -82,6 +88,7 @@ export function DustModal({ open, onClose, mode }: DustModalProps) {
       setError('Operation timed out after 120s');
       setStep('result');
       port.disconnect();
+      setActivePort(null);
     }, 120_000);
 
     port.onMessage.addListener((msg) => {
@@ -94,6 +101,7 @@ export function DustModal({ open, onClose, mode }: DustModalProps) {
         }
         setStep('result');
         port.disconnect();
+        setActivePort(null);
       }
     });
   }

@@ -86,12 +86,27 @@ export async function switchWallet(index: number): Promise<Uint8Array> {
 }
 
 export async function switchEnvironment(environment: Environment): Promise<Uint8Array | null> {
-  const store = await getStore();
-  // Find the first wallet for this environment
-  const idx = store.wallets.findIndex((w) => w.environment === environment);
-  if (idx === -1) return null;
+  return withStoreLock(async () => {
+    const store = await getStore();
+    const idx = store.wallets.findIndex((w) => w.environment === environment);
+    if (idx === -1) return null;
 
-  return switchWallet(idx);
+    const wallet = store.wallets[idx];
+    if (!wallet) return null;
+    store.activeWalletIndex = idx;
+    store.activeEnvironment = wallet.environment;
+    await saveWalletStore(store);
+
+    activeSeed = new Uint8Array(wallet.seed);
+
+    await chrome.storage.session.set({
+      gsdSessionActive: true,
+      gsdEnvironment: wallet.environment,
+      gsdActiveWalletIdx: idx,
+    });
+
+    return activeSeed;
+  });
 }
 
 export async function getWalletsForEnvironment(environment: Environment): Promise<Array<{ index: number; name: string }>> {
