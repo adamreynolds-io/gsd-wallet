@@ -1,20 +1,3 @@
-import { NIGHT_TOKEN_ID } from '@shared/constants';
-
-export function getTokenDisplayName(
-  tokenId: string,
-  tokenType: 'shielded' | 'unshielded',
-): string {
-  if (tokenType === 'unshielded' && tokenId === NIGHT_TOKEN_ID) {
-    return 'NIGHT';
-  }
-  return `${tokenId.substring(0, 8)}...`;
-}
-
-export function truncateAddress(address: string): string {
-  if (address.length <= 40) return address;
-  return `${address.substring(0, 20)}...${address.substring(address.length - 16)}`;
-}
-
 export function formatTimeRemaining(
   targetDate: Date,
   now: Date = new Date(),

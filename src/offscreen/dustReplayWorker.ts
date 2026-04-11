@@ -56,16 +56,18 @@ async function handleReplay(request: ReplayRequest): Promise<void> {
   const WalletClass = CustomDustWallet(config, builder);
   const wallet = WalletClass.startWithSeed(seed, dustParameters);
 
-  await wallet.start(dustSecretKey);
-  await wallet.waitForSyncedState();
+  try {
+    await wallet.start(dustSecretKey);
+    await wallet.waitForSyncedState();
 
-  const serializedState = await wallet.serializeState();
-  const maxEventId = await getMaxEventId(network, 'dust');
+    const serializedState = await wallet.serializeState();
+    const maxEventId = await getMaxEventId(network, 'dust');
 
-  const response: ReplayResponse = { type: 'DONE', serializedState, maxEventId };
-  self.postMessage(response);
-
-  await wallet.stop();
+    const response: ReplayResponse = { type: 'DONE', serializedState, maxEventId };
+    self.postMessage(response);
+  } finally {
+    await wallet.stop();
+  }
 }
 
 self.onmessage = (e: MessageEvent) => {

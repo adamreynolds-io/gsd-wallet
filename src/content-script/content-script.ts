@@ -5,8 +5,6 @@
  */
 export {};
 
-import inpageCode from './inpage.js?raw';
-
 const INPAGE_SRC = 'gsd-wallet-inpage';
 const CONTENT_SRC = 'gsd-wallet-content';
 
@@ -72,6 +70,8 @@ window.addEventListener('message', (event) => {
   if (event.data?.source !== INPAGE_SRC) return;
 
   const { requestId, payload } = event.data;
+  if (typeof requestId !== 'string' || !requestId) return;
+  if (!payload || typeof payload !== 'object') return;
 
   sendViaSw(requestId, payload, window.location.origin, (response) => {
     window.postMessage(

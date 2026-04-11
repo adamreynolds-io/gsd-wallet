@@ -96,12 +96,14 @@ async function handleRequest(msg: { id: string; type: string; payload: unknown }
       }
 
       case 'SEND_TRANSFER': {
+        await walletManager.waitForReady();
         const result = await handleTransfer(data as unknown as TransferRequest);
         sendResponse(id, result);
         break;
       }
 
       case 'DUST_REGISTER': {
+        await walletManager.waitForReady();
         const result = await handleDustRegister(
           data['utxoIds'] as string[],
           data['receiverAddress'] as string | undefined,
@@ -111,6 +113,7 @@ async function handleRequest(msg: { id: string; type: string; payload: unknown }
       }
 
       case 'DUST_DEREGISTER': {
+        await walletManager.waitForReady();
         const result = await handleDustDeregister(data['utxoIds'] as string[]);
         sendResponse(id, result);
         break;

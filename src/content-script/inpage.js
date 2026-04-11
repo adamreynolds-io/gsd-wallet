@@ -59,7 +59,7 @@ function sendRequest(payload) {
     }
 
     window.addEventListener('message', handleResponse);
-    window.postMessage({ source: INPAGE_SOURCE, requestId, payload }, '*');
+    window.postMessage({ source: INPAGE_SOURCE, requestId, payload }, window.location.origin);
   });
 }
 

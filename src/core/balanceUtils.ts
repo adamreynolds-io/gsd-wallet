@@ -38,9 +38,10 @@ export function formatBalance(
 
   const wholeStr = value.toLocaleString('en-US');
   if (fractionalPart > 0n) {
+    const decimals = denomination.toString().length - 1;
     const fracStr = fractionalPart
       .toString()
-      .padStart(6, '0')
+      .padStart(decimals, '0')
       .replace(/0+$/, '');
     return `${wholeStr}.${fracStr}`;
   }

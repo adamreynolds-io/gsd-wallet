@@ -1,6 +1,6 @@
 import { emit, rehydrate, sessionId } from './diagnosticLogger';
 import { setupMessageRouter } from './messageRouter';
-import { startUpdateChecker } from './updateChecker';
+import { startUpdateChecker, handleUpdateAlarm } from './updateChecker';
 import * as offscreenClient from './offscreenClient';
 import * as stateManager from './stateManager';
 
@@ -113,6 +113,10 @@ async function waitForConnection(timeoutMs: number): Promise<boolean> {
 // Register port listeners BEFORE creating the offscreen document,
 // so the offscreen's incoming port connection is handled immediately.
 setupMessageRouter();
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'gsd-update-check') handleUpdateAlarm();
+});
 
 rehydrate().then(async () => {
   emit('info', 'sw', 'Service worker started', { sessionId });

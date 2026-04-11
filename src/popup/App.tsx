@@ -7,6 +7,7 @@ import { Dashboard } from '@popup/pages/Dashboard';
 import { Settings } from '@popup/pages/Settings';
 import { usePopupStore } from '@popup/store/popupStore';
 import { useWalletConnection } from '@popup/hooks/useWalletState';
+import { ErrorBoundary } from '@popup/components/ErrorBoundary';
 
 const DISCLAIMER_KEY = 'gsdDisclaimerAccepted';
 
@@ -45,6 +46,7 @@ export function App() {
     <div className="flex flex-col h-full">
       <Header />
       <main className="flex-1 min-h-0 overflow-hidden flex flex-col">
+        <ErrorBoundary>
         <Routes>
           <Route
             path="/"
@@ -55,6 +57,7 @@ export function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
+        </ErrorBoundary>
       </main>
     </div>
   );

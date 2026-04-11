@@ -276,6 +276,7 @@ function openSocket(): void {
       activeSessionId = null;
       socketState = 'waiting';
       broadcastStateChange();
+      for (const entry of pendingSocketRequests.values()) clearTimeout(entry.timer);
       pendingSocketRequests.clear();
       if (closedSessionId) {
         self.postMessage({
@@ -328,6 +329,7 @@ export function disconnect(): void {
   }
   socketState = 'off';
   activeSessionId = null;
+  for (const entry of pendingSocketRequests.values()) clearTimeout(entry.timer);
   pendingSocketRequests.clear();
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer);
@@ -345,6 +347,7 @@ export function endSession(reason: string): void {
   send({ type: 'SESSION_ENDED', reason });
   activeSessionId = null;
   socketState = 'waiting';
+  for (const entry of pendingSocketRequests.values()) clearTimeout(entry.timer);
   pendingSocketRequests.clear();
   broadcastStateChange();
   if (closedSessionId) {

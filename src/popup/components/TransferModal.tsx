@@ -86,8 +86,15 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
       },
     });
 
+    const timeout = setTimeout(() => {
+      setResultError('Transfer timed out after 120s');
+      setStep('result');
+      port.disconnect();
+    }, 120_000);
+
     port.onMessage.addListener((msg) => {
       if (msg.type === 'TRANSFER_RESULT') {
+        clearTimeout(timeout);
         if (msg.result.success) {
           setTxId(msg.result.txId);
         } else {

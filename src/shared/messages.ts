@@ -92,7 +92,9 @@ export type PopupResponse =
   | { type: 'UPDATE_AVAILABLE'; currentVersion: string; latestVersion: string; releaseUrl: string; downloadUrl: string }
   | { type: 'ERROR'; error: string }
   | { type: 'EXPORT_CACHE_RESULT'; data: string }
-  | { type: 'CONNECT_STATUS'; state: SocketState; sessionId?: string };
+  | { type: 'CONNECT_STATUS'; state: SocketState; sessionId?: string }
+  | { type: 'WALLET_SWITCHED'; success: boolean }
+  | { type: 'ENVIRONMENT_SWITCHED'; success: boolean };
 
 export interface TransferRequest {
   tokenType: 'shielded' | 'unshielded';

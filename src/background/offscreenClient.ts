@@ -37,6 +37,8 @@ let isReady = false;
 export function acceptPort(incoming: chrome.runtime.Port): void {
   port = incoming;
   isReady = false;
+  readyPromise = null;
+  readyResolve = null;
 
   port.onMessage.addListener((msg: OffscreenResponse | OffscreenBroadcast) => {
     if (msg.id !== null) {
@@ -75,7 +77,7 @@ export function acceptPort(incoming: chrome.runtime.Port): void {
   });
 }
 
-export function request(
+export async function request(
   type: OffscreenRequestType,
   payload: unknown,
 ): Promise<unknown> {

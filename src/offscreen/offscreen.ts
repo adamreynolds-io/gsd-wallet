@@ -1,9 +1,11 @@
 const PORT_NAME = 'gsd-offscreen';
 const HEARTBEAT_INTERVAL_MS = 10_000;
-const RECONNECT_DELAY_MS = 500;
+const RECONNECT_BASE_MS = 500;
+const RECONNECT_MAX_MS = 30_000;
 
 let swPort: chrome.runtime.Port | null = null;
 let workerReady = false;
+let reconnectDelay = RECONNECT_BASE_MS;
 
 // Create the Web Worker that hosts the WalletFacade
 const worker = new Worker(
@@ -34,6 +36,7 @@ worker.onerror = (e: ErrorEvent) => {
 function connectToServiceWorker(): void {
   const port = chrome.runtime.connect({ name: PORT_NAME });
   swPort = port;
+  reconnectDelay = RECONNECT_BASE_MS;
 
   // Relay SW port messages → Worker
   port.onMessage.addListener((msg) => {
@@ -42,8 +45,9 @@ function connectToServiceWorker(): void {
 
   port.onDisconnect.addListener(() => {
     if (swPort === port) swPort = null;
-    // SW may have restarted — reconnect
-    setTimeout(connectToServiceWorker, RECONNECT_DELAY_MS);
+    // SW may have restarted — reconnect with exponential backoff
+    setTimeout(connectToServiceWorker, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
   });
 
   // If Worker is already ready, signal SW immediately

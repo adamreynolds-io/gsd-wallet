@@ -22,7 +22,12 @@ async function importNdjson(network: string, text: string): Promise<number> {
   let dustBatch: Array<{ id: number; raw: string; maxId: number }> = [];
 
   for (const line of lines) {
-    const event = JSON.parse(line) as { id: number; raw: string; maxId: number; t: string };
+    let event: { id: number; raw: string; maxId: number; t: string };
+    try {
+      event = JSON.parse(line) as { id: number; raw: string; maxId: number; t: string };
+    } catch {
+      continue;
+    }
     const batch = event.t === 'zswap' ? zswapBatch : dustBatch;
     batch.push({ id: event.id, raw: event.raw, maxId: event.maxId });
 

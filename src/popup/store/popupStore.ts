@@ -12,6 +12,8 @@ import { DIAGNOSTIC_LEVELS, DIAGNOSTIC_CATEGORIES } from '@shared/types';
 
 const MAX_DIAGNOSTIC_EVENTS = 2000;
 
+let statusTimer: ReturnType<typeof setTimeout> | null = null;
+
 function makeFilterRecord<T extends string>(keys: readonly T[]): Record<T, boolean> {
   const rec = {} as Record<T, boolean>;
   for (const k of keys) { rec[k] = true; }
@@ -83,9 +85,13 @@ export const usePopupStore = create<PopupState>((set) => ({
   setEnvironment: (environment) => set({ environment }),
   setError: (error) => set({ error }),
   showStatusMessage: (text, type, duration = 3000) => {
+    if (statusTimer) clearTimeout(statusTimer);
     set({ statusMessage: { text, type } });
     if (duration > 0) {
-      setTimeout(() => set({ statusMessage: null }), duration);
+      statusTimer = setTimeout(() => {
+        statusTimer = null;
+        set({ statusMessage: null });
+      }, duration);
     }
   },
   clearStatusMessage: () => set({ statusMessage: null }),

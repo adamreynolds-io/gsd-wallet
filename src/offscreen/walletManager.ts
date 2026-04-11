@@ -167,7 +167,7 @@ function serializeState(
   const reallySynced = facadeState.isSynced || (allConnected && shieldedSynced && unshieldedSynced && dustSynced);
 
   let dustBal = 0n;
-  try { dustBal = facadeState.dust.balance(new Date()); } catch { /* */ }
+  try { dustBal = facadeState.dust.balance(new Date()); } catch (e) { emit('debug', 'wallet', 'Dust balance read failed', { error: String(e) }); }
 
   const nid = getEnvironmentConfig(environment).networkId;
   let shieldedAddr = '';
@@ -293,142 +293,6 @@ function makeDustBuilder(network: string, skipCache = false, preScanned = false)
     .withCoinSelectionDefaults()
     .withCoinsAndBalancesDefaults()
     .withKeysDefaults();
-}
-
-const SCAN_TIMEOUT_MS = 180_000;
-
-interface ScanResult {
-  matched: boolean;
-  lastEventId: number;
-  maxId: number;
-}
-
-/**
- * Spawns two scan workers (one shielded, one dust) to check all cached
- * events for wallet matches in parallel on separate CPU cores.
- *
- * Each worker uses `CoreWallet.replayEvents` directly (no SDK sync
- * runtime) and processes the full event range from 0. The Merkle
- * commitment tree requires sequential insertion so chunking is not
- * possible.
- *
- * If both workers report "no matches", the wallet can skip WASM
- * deserialization entirely and fast-forward through cached events.
- *
- * Returns null if cache is empty or any worker fails.
- */
-async function scanCacheForMatches(
-  network: string,
-  networkId: string,
-  derivedKeys: Record<number, Uint8Array>,
-): Promise<{ shielded: ScanResult; dust: ScanResult } | null> {
-  const [shieldedMax, dustMax] = await Promise.all([
-    getMaxEventId(network, 'zswap'),
-    getMaxEventId(network, 'dust'),
-  ]);
-
-  if (shieldedMax === 0 && dustMax === 0) return null;
-
-  emit('info', 'sync', 'Starting parallel cache scan', {
-    network,
-    shieldedMax,
-    dustMax,
-    workers: 2,
-  });
-
-  const t0 = Date.now();
-
-  function spawnScanWorker(
-    type: 'zswap' | 'dust',
-    seed: Uint8Array,
-    fromId: number,
-    toId: number,
-  ): Promise<{ matched: boolean; lastEventId: number; maxId: number; coinCount: number }> {
-    return new Promise((resolve, reject) => {
-      // Vite requires `new Worker(new URL(..., import.meta.url))` inline
-      const worker = new Worker(
-        new URL('./scanWorker.ts', import.meta.url),
-        { type: 'module' },
-      );
-
-      const timer = setTimeout(() => {
-        worker.terminate();
-        reject(new Error(`Scan worker ${type} [${fromId}→${toId}] timed out`));
-      }, SCAN_TIMEOUT_MS);
-
-      worker.onmessage = (event: MessageEvent) => {
-        clearTimeout(timer);
-        const msg = event.data as {
-          type: string;
-          matched?: boolean;
-          lastEventId?: number;
-          maxId?: number;
-          coinCount?: number;
-          error?: string;
-        };
-        if (msg.type === 'DONE') {
-          resolve({
-            matched: msg.matched ?? false,
-            lastEventId: msg.lastEventId ?? toId,
-            maxId: msg.maxId ?? toId,
-            coinCount: msg.coinCount ?? 0,
-          });
-        } else {
-          reject(new Error(`Scan worker ${type} [${fromId}→${toId}] failed: ${msg.error ?? 'unknown'}`));
-        }
-        worker.terminate();
-      };
-
-      worker.onerror = (err) => {
-        clearTimeout(timer);
-        reject(new Error(`Scan worker error: ${err.message}`));
-        worker.terminate();
-      };
-
-      worker.postMessage({
-        type,
-        network,
-        networkId,
-        seed: Array.from(seed),
-        fromId,
-        toId,
-      });
-    });
-  }
-
-  try {
-    const [shieldedResult, dustResult] = await Promise.all([
-      spawnScanWorker('zswap', derivedKeys[Roles.Zswap]!, 0, shieldedMax),
-      spawnScanWorker('dust', derivedKeys[Roles.Dust]!, 0, dustMax),
-    ]);
-
-    emit('info', 'sync', 'Parallel scan complete', {
-      elapsed: Date.now() - t0,
-      shieldedMatched: shieldedResult.matched,
-      dustMatched: dustResult.matched,
-      shieldedCoins: shieldedResult.coinCount,
-      dustCoins: dustResult.coinCount,
-    });
-
-    return {
-      shielded: {
-        matched: shieldedResult.matched,
-        lastEventId: shieldedResult.lastEventId,
-        maxId: shieldedResult.maxId,
-      },
-      dust: {
-        matched: dustResult.matched,
-        lastEventId: dustResult.lastEventId,
-        maxId: dustResult.maxId,
-      },
-    };
-  } catch (err) {
-    emit('warn', 'sync', 'Parallel scan failed, falling back to sequential', {
-      error: String(err),
-      elapsed: Date.now() - t0,
-    });
-    return null;
-  }
 }
 
 async function initializeWalletCore(
@@ -814,6 +678,22 @@ async function initializeWalletCore(
     })
     .catch((err) => {
       emit('error', 'wallet', 'facade.start failed', { error: String(err) }, Date.now() - startT0);
+      const errorState: SerializedWalletState = {
+        status: 'error',
+        environment,
+        activeAccountIndex: accountIndex,
+        shielded: { address: '', balances: {}, coinCount: 0, syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+        unshielded: { address: '', balances: {}, utxos: [], syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+        dust: { address: '', balance: '0', syncPercent: 0, progress: { applied: 0, highest: 0, highestIndex: 0, connected: false } },
+        overallSyncPercent: 0,
+        isSynced: false,
+        syncPhase: 'stalled',
+        connections: { node: false, indexer: false, prover: false },
+        activeWalletName: walletName,
+      };
+      for (const listener of stateListeners) {
+        listener(errorState);
+      }
     });
   activeWallet.startPromise = startPromise;
 }

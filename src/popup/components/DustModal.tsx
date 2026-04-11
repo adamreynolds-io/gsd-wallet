@@ -77,8 +77,16 @@ export function DustModal({ open, onClose, mode }: DustModalProps) {
     });
 
     const resultType = isRegister ? 'DUST_REGISTER_RESULT' : 'DUST_DEREGISTER_RESULT';
+
+    const timeout = setTimeout(() => {
+      setError('Operation timed out after 120s');
+      setStep('result');
+      port.disconnect();
+    }, 120_000);
+
     port.onMessage.addListener((msg) => {
       if (msg.type === resultType) {
+        clearTimeout(timeout);
         if (msg.result.success) {
           setTxId(msg.result.txId);
         } else {

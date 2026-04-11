@@ -4,6 +4,13 @@ import {
 } from '@shared/storage';
 import type { Environment, WalletStore, WalletEntry } from '@shared/types';
 
+let mutexChain = Promise.resolve();
+function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
+  const next = mutexChain.then(fn, fn);
+  mutexChain = next.then(() => {}, () => {});
+  return next;
+}
+
 let activeSeed: Uint8Array | null = null;
 
 export function isUnlocked(): boolean {
@@ -28,50 +35,54 @@ export async function addWallet(
   seed: Uint8Array,
   environment: Environment,
 ): Promise<void> {
-  const store = await getStore();
-  // Append index if the name doesn't already include one (e.g. "Mainnet" → "Mainnet 0")
-  const isGenesis = /^Genesis W[0-3]$/.test(name);
-  let walletName = name;
-  if (!isGenesis) {
-    const existingCount = store.wallets.filter((w) => w.environment === environment).length;
-    walletName = `${name} ${existingCount}`;
-  }
-  store.wallets.push({
-    name: walletName,
-    seed: Array.from(seed),
-    environment,
-  });
-  store.activeEnvironment = environment;
-  store.activeWalletIndex = store.wallets.length - 1;
-  await saveWalletStore(store);
+  return withStoreLock(async () => {
+    const store = await getStore();
+    // Append index if the name doesn't already include one (e.g. "Mainnet" → "Mainnet 0")
+    const isGenesis = /^Genesis W[0-3]$/.test(name);
+    let walletName = name;
+    if (!isGenesis) {
+      const existingCount = store.wallets.filter((w) => w.environment === environment).length;
+      walletName = `${name} ${existingCount}`;
+    }
+    store.wallets.push({
+      name: walletName,
+      seed: Array.from(seed),
+      environment,
+    });
+    store.activeEnvironment = environment;
+    store.activeWalletIndex = store.wallets.length - 1;
+    await saveWalletStore(store);
 
-  activeSeed = seed;
+    activeSeed = seed;
 
-  await chrome.storage.session.set({
-    gsdSessionActive: true,
-    gsdEnvironment: environment,
-    gsdActiveWalletIdx: store.activeWalletIndex,
+    await chrome.storage.session.set({
+      gsdSessionActive: true,
+      gsdEnvironment: environment,
+      gsdActiveWalletIdx: store.activeWalletIndex,
+    });
   });
 }
 
 export async function switchWallet(index: number): Promise<Uint8Array> {
-  const store = await getStore();
-  const wallet = store.wallets[index];
-  if (!wallet) throw new Error(`Wallet ${index} not found`);
+  return withStoreLock(async () => {
+    const store = await getStore();
+    const wallet = store.wallets[index];
+    if (!wallet) throw new Error(`Wallet ${index} not found`);
 
-  store.activeWalletIndex = index;
-  store.activeEnvironment = wallet.environment;
-  await saveWalletStore(store);
+    store.activeWalletIndex = index;
+    store.activeEnvironment = wallet.environment;
+    await saveWalletStore(store);
 
-  activeSeed = new Uint8Array(wallet.seed);
+    activeSeed = new Uint8Array(wallet.seed);
 
-  await chrome.storage.session.set({
-    gsdSessionActive: true,
-    gsdEnvironment: wallet.environment,
-    gsdActiveWalletIdx: index,
+    await chrome.storage.session.set({
+      gsdSessionActive: true,
+      gsdEnvironment: wallet.environment,
+      gsdActiveWalletIdx: index,
+    });
+
+    return activeSeed;
   });
-
-  return activeSeed;
 }
 
 export async function switchEnvironment(environment: Environment): Promise<Uint8Array | null> {
@@ -114,18 +125,22 @@ export async function clearAll(): Promise<void> {
 }
 
 export async function deleteWallet(index: number): Promise<void> {
-  const store = await getStore();
-  if (!store.wallets[index]) throw new Error(`Wallet ${index} not found`);
-  store.wallets.splice(index, 1);
-  if (store.wallets.length === 0) {
-    store.activeWalletIndex = 0;
-    store.activeEnvironment = 'undeployed';
-  } else if (index <= store.activeWalletIndex) {
-    store.activeWalletIndex = Math.max(0, store.activeWalletIndex - 1);
-    const w = store.wallets[store.activeWalletIndex];
-    if (w) store.activeEnvironment = w.environment;
-  }
-  await saveWalletStore(store);
+  return withStoreLock(async () => {
+    const store = await getStore();
+    if (!store.wallets[index]) throw new Error(`Wallet ${index} not found`);
+    store.wallets.splice(index, 1);
+    if (store.wallets.length === 0) {
+      store.activeWalletIndex = 0;
+      store.activeEnvironment = 'undeployed';
+    } else if (index <= store.activeWalletIndex) {
+      store.activeWalletIndex = Math.max(0, store.activeWalletIndex - 1);
+      const w = store.wallets[store.activeWalletIndex];
+      if (w) store.activeEnvironment = w.environment;
+    }
+    await saveWalletStore(store);
+    const newActive = store.wallets[store.activeWalletIndex];
+    activeSeed = newActive ? new Uint8Array(newActive.seed) : null;
+  });
 }
 
 export async function getAllWalletsGrouped(): Promise<{
