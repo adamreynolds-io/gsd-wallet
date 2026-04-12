@@ -227,10 +227,12 @@ function strategyLabel(kThreshold: number): string {
 
 function optionLabel(kThreshold: number, benchmark: DeviceBenchmark | null): string {
   if (kThreshold === 0) return 'Server only';
+  const suffix = kThreshold === 9 ? '  (no dApp circuits)' : '';
   const base = `WASM \u2264${kThreshold}`;
-  if (!benchmark) return base;
+  if (!benchmark) return `${base}${suffix}`;
   const est = benchmark.estimates[kThreshold];
-  return est !== undefined ? `${base}  ${formatEstimatedTime(est)}` : base;
+  const time = est !== undefined ? `  ${formatEstimatedTime(est)}` : '';
+  return `${base}${time}${suffix}`;
 }
 
 function sendStrategyMessage(strategy: ProvingStrategy, onUpdate: (s: ProvingStrategy) => void): void {
