@@ -33,7 +33,7 @@ describe('formatBalance', () => {
   });
 
   it('pads fractional part for NIGHT (6-digit denomination)', () => {
-    // 1 speck = 0.000001 NIGHT
+    // 1 star = 0.000001 NIGHT
     expect(formatBalance(1n, NIGHT_DENOMINATION)).toBe('0.000001');
   });
 

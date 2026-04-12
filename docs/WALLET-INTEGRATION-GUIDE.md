@@ -746,10 +746,10 @@ A wallet showing NIGHT=0 with contract tokens present is **correct behavior, not
 
 ### Denominations
 
-| Token | Smallest unit | Display denomination | Conversion |
+| Asset | Smallest unit | Display denomination | Conversion |
 |-------|--------------|---------------------|------------|
-| NIGHT | 1 | 10^6 | `value / 1_000_000n` |
-| DUST | 1 (SPECK) | 10^15 | `value / 1_000_000_000_000_000n` |
+| NIGHT | 1 (star) | 10^6 | `value / 1_000_000n` |
+| DUST | 1 (speck) | 10^15 | `value / 1_000_000_000_000_000n` |
 | Contract tokens | 1 | Contract-defined | Check the contract source for the denomination |
 
 ---
