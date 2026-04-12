@@ -2,6 +2,12 @@
 // Maps relative paths (under data/proving/) to SHA-256 hex digests
 
 export const KEY_DIGESTS: Record<string, string> = {
+  'bench/bench_k10.bzkir': '833adb07e48001c8298bf203770b4dc2bf141c84e8c3a84d365894fc07c8bb3a',
+  'bench/bench_k10.prover': '5b5e8ff644f16d11a90240f1be25011c53df2dde78e6c2edab8d73cfcf06e5a7',
+  'bench/bench_k10.verifier': '62d768951a97c18af8cb385f8c0fe6488a4dbfbebce83ea08b21914a0ebe7789',
+  'bench/bench_k11.bzkir': '9020882b89c1a8bba66ae6fc4c5f3374ce1426fd02309edc433b8b014f8a2cc7',
+  'bench/bench_k11.prover': 'a5ede36ef575b2117ac7f2f99efbfdcb84931239757a3c5013afe21607ca9758',
+  'bench/bench_k11.verifier': '379e97dff15935e140ad4c44c260c38e8a464150f55a10244341b5639726d2cb',
   'benchmark-k10.preimage': '973e37eae13b79d875565c642175e5d2f80c345c2c44358eedd6e15335c3fc4d',
   'benchmark-k11.preimage': '51500b8b04a1ef442b6af0c372db3e4eebdbbded0b2b53da9611cbb55f7154e4',
   'bls_midnight_2p10': '46b2290933cbed4c378889e4ba971f1a92888331ffb09466acd4ff61a1e2cb42',
