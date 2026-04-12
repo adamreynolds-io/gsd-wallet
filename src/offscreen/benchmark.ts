@@ -19,7 +19,7 @@ export async function runBenchmark(
 ): Promise<DeviceBenchmark> {
   await keyMaterialProvider.getParams(BENCHMARK_K);
 
-  const fixtureUrl = chrome.runtime.getURL(BENCHMARK_FIXTURE_PATH);
+  const fixtureUrl = `${self.location.origin}/${BENCHMARK_FIXTURE_PATH}`;
   const fixtureResponse = await fetch(fixtureUrl);
   if (!fixtureResponse.ok) {
     throw new Error(

@@ -48,10 +48,14 @@ async function fetchWithRetry(url: string, retries = 5): Promise<ArrayBuffer> {
   throw new Error(`Failed to fetch ${url} after ${retries} attempts: ${String(lastErr)}`);
 }
 
+/** Extension origin works in both extension pages and Web Workers. */
+function extensionURL(path: string): string {
+  return `${self.location.origin}/${path}`;
+}
+
 async function fetchBundled(path: string): Promise<ArrayBuffer | null> {
   try {
-    const url = chrome.runtime.getURL(`data/proving/${path}`);
-    const response = await fetch(url);
+    const response = await fetch(extensionURL(`data/proving/${path}`));
     if (!response.ok) return null;
     return response.arrayBuffer();
   } catch {
