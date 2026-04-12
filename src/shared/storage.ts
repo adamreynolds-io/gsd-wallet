@@ -11,7 +11,7 @@ import type {
 } from './types';
 
 const DB_NAME = 'gsd-wallet';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 type GsdDB = IDBPDatabase;
 
@@ -37,6 +37,10 @@ function getDb(): Promise<GsdDB> {
         if (oldVersion < 3) {
           const store = db.createObjectStore('networkEvents', { keyPath: 'key' });
           store.createIndex('byNetworkAndType', ['network', 'type']);
+        }
+        if (oldVersion < 4) {
+          db.createObjectStore('provingKeys', { keyPath: 'location' });
+          db.createObjectStore('provingParams', { keyPath: 'k' });
         }
       },
     });
@@ -284,4 +288,40 @@ export async function clearNetworkEvents(
     }
   }
   await tx.done;
+}
+
+// --- Proving Key Cache ---
+
+export interface ProvingKeyEntry {
+  location: string;
+  proverKey: Uint8Array;
+  verifierKey: Uint8Array;
+  ir: Uint8Array;
+}
+
+export async function getProvingKey(location: string): Promise<ProvingKeyEntry | undefined> {
+  const db = await getDb();
+  return db.get('provingKeys', location) as Promise<ProvingKeyEntry | undefined>;
+}
+
+export async function saveProvingKey(entry: ProvingKeyEntry): Promise<void> {
+  const db = await getDb();
+  await db.put('provingKeys', entry);
+}
+
+// --- Proving Params Cache ---
+
+export interface ProvingParamsEntry {
+  k: number;
+  data: Uint8Array;
+}
+
+export async function getProvingParams(k: number): Promise<ProvingParamsEntry | undefined> {
+  const db = await getDb();
+  return db.get('provingParams', k) as Promise<ProvingParamsEntry | undefined>;
+}
+
+export async function saveProvingParams(entry: ProvingParamsEntry): Promise<void> {
+  const db = await getDb();
+  await db.put('provingParams', entry);
 }
