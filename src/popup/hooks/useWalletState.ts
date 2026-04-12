@@ -155,6 +155,10 @@ export function useWalletConnection(): void {
           const store = usePopupStore.getState();
           store.addDiagnosticEventsBatch(changes['gsdDiagnosticEvents'].newValue as import('@shared/types').DiagnosticEvent[]);
         }
+        if (changes['gsdDeviceBenchmark']?.newValue) {
+          const store = usePopupStore.getState();
+          store.setDeviceBenchmark(changes['gsdDeviceBenchmark'].newValue as import('@shared/types').DeviceBenchmark);
+        }
       }
     };
     chrome.storage.onChanged.addListener(storageListener);
