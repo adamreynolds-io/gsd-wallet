@@ -99,6 +99,47 @@ All environments configured in `src/shared/environments.ts`. Proof server is alw
 
 The packages are independent (no yarn/pnpm workspaces). `gsd-socket` has its own lockfile and dependencies.
 
+## Proving
+
+Transactions require zero-knowledge proofs. Two modes are available, controlled by a `ProvingStrategy` with a k-value threshold:
+
+| Strategy | kThreshold | Behavior |
+|----------|-----------|----------|
+| WASM (all) | `Infinity` | All proofs via in-browser WASM. No server needed. |
+| WASM <=N | `10`-`17` | WASM for circuits with k<=N, proof server for k>N |
+| Server only | `0` | All proofs via external proof server at `localhost:6300` |
+
+### Architecture
+
+```
+WalletFacade.finalizeRecipe()
+  -> compositeProvingService.prove(tx)
+    -> trackingKeyMaterialProvider.getParams(k)
+      -> if k > kThreshold: throw KValueExceededError -> fall back to server
+      -> if aborted: throw ProvingCancelledError -> fall back to server
+    -> makeWasmProvingService / makeServerProvingService
+```
+
+The composite service (`src/offscreen/compositeProvingService.ts`) wraps both WASM and server provers. It creates a tracking `KeyMaterialProvider` wrapper that intercepts `getParams(k)` to check the threshold before loading BLS params. Cancellation uses `AbortController` — the WASM Worker is terminated cleanly.
+
+### Key material
+
+Key material is resolved via a three-tier cache in `src/offscreen/keyMaterialProvider.ts`:
+1. In-memory Map (hot path)
+2. IndexedDB stores (`provingKeys`, `provingParams`)
+3. Bundled files via `chrome.runtime.getURL('data/proving/...')` (k<=16)
+4. S3 fallback for unbundled k values (k>=17)
+
+Bundled files are fetched via `scripts/fetch-proving-data.sh` (not committed to git). Circuit keys use version 9 paths (`zswap/9/spend.prover` etc.).
+
+### Device benchmark
+
+On first install or on demand, a k=10 proof fixture is proved via WASM. The wall-clock time is extrapolated using the doubling model: `time(k) = k10Time * 2^(k-10)`. Results are stored in `chrome.storage.local` as `gsdDeviceBenchmark` and shown in the header dropdown.
+
+### Strategy persistence
+
+The active strategy is stored in `chrome.storage.local` as `gsdProvingStrategy` and restored on extension restart. Default: `{ kThreshold: 17 }`.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

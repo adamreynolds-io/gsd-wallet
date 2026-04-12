@@ -139,50 +139,26 @@ export function createCompositeProvingService(config: CompositeProvingServiceCon
   const provingService: ProvingService<UnboundTransaction> = {
     async prove(transaction) {
       const { kThreshold } = currentStrategy;
-      emitStatus({ phase: 'idle', activeProver: null });
 
       if (kThreshold === 0) {
         return proveWithServer(transaction, 'server-only', 'server');
       }
 
       if (kThreshold === Infinity) {
-        const t0 = Date.now();
-        emitStatus({ phase: 'loading-keys', activeProver: 'wasm' });
-        const controller = new AbortController();
-        abortController = controller;
-        let detectedK: number | undefined;
-
-        const trackingProvider = makeTrackingProvider(
-          controller.signal,
-          Infinity,
-          (k) => {
-            detectedK = k;
-            emitStatus({ phase: 'proving', activeProver: 'wasm', kValue: k });
-          },
-        );
-
-        const wasmService = makeWasmProvingService({ keyMaterialProvider: trackingProvider });
+        // WASM-only: no server fallback on cancel or error
         try {
-          const result = await wasmService.prove(transaction);
-          const wasmDoneStatus: ProvingStatus = {
-            phase: 'done',
-            activeProver: 'wasm',
-            elapsed: Date.now() - t0,
-            ...(detectedK !== undefined ? { kValue: detectedK } : {}),
-          };
-          emitStatus(wasmDoneStatus);
-          return result;
+          return await proveWithWasm(transaction, Infinity);
         } catch (err) {
-          abortController = null;
-          emitStatus({
-            phase: 'error',
-            activeProver: 'wasm',
-            elapsed: Date.now() - t0,
-            error: err instanceof Error ? err.message : String(err),
-          });
+          if (err instanceof ProvingCancelledError) {
+            emitStatus({ phase: 'cancelled', activeProver: null });
+          } else {
+            emitStatus({
+              phase: 'error',
+              activeProver: 'wasm',
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
           throw err;
-        } finally {
-          abortController = null;
         }
       }
 

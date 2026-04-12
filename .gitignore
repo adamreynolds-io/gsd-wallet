@@ -6,3 +6,6 @@ dist/
 *.crx
 *.pem
 *.zip
+
+# Bundled proving key material (fetched via scripts/fetch-proving-data.sh)
+public/data/proving/

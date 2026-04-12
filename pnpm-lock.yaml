@@ -20,6 +20,12 @@ importers:
       '@midnight-ntwrk/wallet-sdk-hd':
         specifier: 3.0.1
         version: 3.0.1
+      '@midnight-ntwrk/wallet-sdk-prover-client':
+        specifier: 1.2.0
+        version: 1.2.0
+      '@midnight-ntwrk/zkir-v2':
+        specifier: 2.1.0
+        version: 2.1.0
       '@scure/bip39':
         specifier: 2.0.1
         version: 2.0.1
@@ -29,6 +35,9 @@ importers:
       buffer:
         specifier: 6.0.3
         version: 6.0.3
+      effect:
+        specifier: 3.21.0
+        version: 3.21.0
       idb:
         specifier: 8.0.3
         version: 8.0.3
