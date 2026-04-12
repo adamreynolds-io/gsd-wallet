@@ -9,3 +9,4 @@ dist/
 
 # Bundled proving key material (fetched via scripts/fetch-proving-data.sh)
 public/data/proving/
+!public/data/proving/benchmark-k10.fixture

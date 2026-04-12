@@ -35,10 +35,6 @@
     {
       "resources": ["src/content-script/inpage.js"],
       "matches": ["<all_urls>"]
-    },
-    {
-      "resources": ["data/*"],
-      "matches": ["<all_urls>"]
     }
   ],
   "content_security_policy": {

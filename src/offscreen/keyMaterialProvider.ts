@@ -6,6 +6,7 @@ import {
   saveProvingParams,
 } from '@shared/storage';
 import type { DiagnosticCategory, DiagnosticLevel } from '@shared/types';
+import { KEY_DIGESTS } from './keyDigests';
 
 const S3_BASE = 'https://midnight-s3-fileshare-dev-eu-west-1.s3.eu-west-1.amazonaws.com';
 const KEY_VERSION = 9;
@@ -58,6 +59,28 @@ async function fetchBundled(path: string): Promise<ArrayBuffer | null> {
   }
 }
 
+async function verifyIntegrity(
+  path: string,
+  buf: ArrayBuffer,
+  emit: EmitFn,
+): Promise<void> {
+  const expected = KEY_DIGESTS[path];
+  if (!expected) {
+    emit('warn', 'proving', `No digest for ${path}, skipping integrity check`);
+    return;
+  }
+  const digest = await crypto.subtle.digest('SHA-256', buf);
+  const actual = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  if (actual !== expected) {
+    throw new Error(
+      `Integrity check failed for ${path}: ` +
+      `expected ${expected.slice(0, 16)}..., got ${actual.slice(0, 16)}...`,
+    );
+  }
+}
+
 /**
  * Creates a KeyMaterialProvider with three-tier cache:
  * in-memory Map -> IndexedDB -> bundled file / S3 fallback.
@@ -97,6 +120,12 @@ export function createKeyMaterialProvider(emit: EmitFn): KeyMaterialProvider {
       fetchBundled(`${path}.prover`).then((b) => b ?? fetchWithRetry(`${S3_BASE}/${path}.prover`)),
       fetchBundled(`${path}.verifier`).then((b) => b ?? fetchWithRetry(`${S3_BASE}/${path}.verifier`)),
       fetchBundled(`${path}.bzkir`).then((b) => b ?? fetchWithRetry(`${S3_BASE}/${path}.bzkir`)),
+    ]);
+
+    await Promise.all([
+      verifyIntegrity(`${path}.prover`, proverBuf, emit),
+      verifyIntegrity(`${path}.verifier`, verifierBuf, emit),
+      verifyIntegrity(`${path}.bzkir`, irBuf, emit),
     ]);
 
     const material: ProvingKeyMaterial = {
@@ -144,6 +173,8 @@ export function createKeyMaterialProvider(emit: EmitFn): KeyMaterialProvider {
     if (buf === null) {
       buf = await fetchWithRetry(`${S3_BASE}/bls_midnight_2p${k}`);
     }
+
+    await verifyIntegrity(`bls_midnight_2p${k}`, buf, emit);
 
     const data = new Uint8Array(buf);
     await saveProvingParams({ k, data });

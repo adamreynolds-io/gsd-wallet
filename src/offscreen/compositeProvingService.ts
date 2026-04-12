@@ -1,12 +1,12 @@
 import {
   makeServerProvingService,
-  makeWasmProvingService,
 } from '@midnight-ntwrk/wallet-sdk-capabilities/proving';
 import type {
   ProvingService,
   UnboundTransaction,
 } from '@midnight-ntwrk/wallet-sdk-capabilities/proving';
 import type { KeyMaterialProvider } from '@midnight-ntwrk/zkir-v2';
+import { makeLocalWasmProvingService } from './localWasmProver';
 import type { ProvingStrategy, ProvingStatus, ProvingMode } from '@shared/types';
 
 export interface CompositeProvingServiceConfig {
@@ -92,7 +92,7 @@ export function createCompositeProvingService(config: CompositeProvingServiceCon
       },
     );
 
-    const wasmService = makeWasmProvingService({ keyMaterialProvider: trackingProvider });
+    const wasmService = makeLocalWasmProvingService({ keyMaterialProvider: trackingProvider });
     try {
       const result = await wasmService.prove(transaction);
       const doneStatus: ProvingStatus = {

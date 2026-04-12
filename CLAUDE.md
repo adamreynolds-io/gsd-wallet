@@ -52,8 +52,10 @@ The wallet builds on `@midnight-ntwrk/wallet-sdk-facade` which wraps shielded, u
 | `wallet-sdk-facade` | Unified wallet API |
 | `wallet-sdk-hd` | HD key derivation (BIP-32/BIP-44) |
 | `wallet-sdk-address-format` | Bech32m address encoding |
-| `wallet-sdk-capabilities` | Proving service factory |
+| `wallet-sdk-capabilities` | Proving service factory (WASM + server) |
+| `wallet-sdk-prover-client` | WasmProver schemas, proof-worker protocol |
 | `ledger-v8` | WASM ledger, transaction types, ZK keys |
+| `zkir-v2` | ZK proving WASM module, KeyMaterialProvider types |
 | `dapp-connector-api` | DApp connector type definitions |
 
 ## Build and test
