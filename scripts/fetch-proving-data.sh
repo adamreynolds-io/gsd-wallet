@@ -26,14 +26,14 @@ for circuit in zswap/spend zswap/output zswap/sign dust/spend; do
     fi
     echo "  fetch $s3_path"
     curl -fsSL "$S3/$s3_path" \
-      --retry 3 --retry-delay 2 -o "$dest" \
-      || echo "  WARN: failed to fetch $s3_path"
+      --retry 5 --retry-all-errors --retry-delay 2 \
+      -o "$dest"
   done
 done
 
 echo "Fetching BLS params (k=10..16, bundled)..."
 
-for k in $(seq 10 16); do
+for ((k=10; k<=16; k++)); do
   file="bls_midnight_2p$k"
   dest="$OUT/$file"
   if [ -f "$dest" ]; then
@@ -42,8 +42,8 @@ for k in $(seq 10 16); do
   fi
   echo "  fetch $file"
   curl -fsSL "$S3/$file" \
-    --retry 3 --retry-delay 2 -o "$dest" \
-    || echo "  WARN: failed to fetch $file"
+    --retry 5 --retry-all-errors --retry-delay 2 \
+    -o "$dest"
 done
 
 echo ""

@@ -78,6 +78,7 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
   }
 
   async function handleSend() {
+    usePopupStore.getState().setProvingStatus(null);
     setStep('processing');
     setError(null);
 

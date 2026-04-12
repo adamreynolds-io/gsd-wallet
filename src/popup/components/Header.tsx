@@ -243,6 +243,9 @@ function sendStrategyMessage(strategy: ProvingStrategy, onUpdate: (s: ProvingStr
       clearTimeout(timeout);
       onUpdate(msg.strategy);
       port.disconnect();
+    } else if (msg.type === 'ERROR') {
+      clearTimeout(timeout);
+      port.disconnect();
     }
   });
   port.postMessage({ type: 'SET_PROVING_STRATEGY', strategy });
@@ -284,6 +287,8 @@ function ProvingStrategySelector() {
     <div className="relative" ref={containerRef}>
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
         className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors
           hover:bg-midnight-600
           ${isProving ? 'text-fuchsia-400 animate-pulse' : 'text-gray-400 hover:text-white'}`}
@@ -293,12 +298,14 @@ function ProvingStrategySelector() {
         <span className="font-mono">{buttonLabel}</span>
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 bg-midnight-700 border border-midnight-500 rounded shadow-lg z-50 min-w-[180px]">
+        <div role="listbox" className="absolute right-0 top-full mt-1 bg-midnight-700 border border-midnight-500 rounded shadow-lg z-50 min-w-[180px]">
           {K_OPTIONS.map((k) => {
             const selected = provingStrategy.kThreshold === k;
             return (
               <button
                 key={k}
+                role="option"
+                aria-selected={selected}
                 onClick={() => handleSelect(k)}
                 className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between gap-2 transition-colors
                   hover:bg-midnight-600

@@ -30,6 +30,7 @@ import * as walletManager from './walletManager';
 import * as connectClient from './connectClient';
 import type { TransferRequest } from '@shared/messages';
 import type { TransactionResult, ProvingStrategy } from '@shared/types';
+import { decodeProvingStrategy } from '@shared/types';
 
 // Serializes transaction operations so concurrent requests don't race on wallet state
 let txQueue = Promise.resolve();
@@ -197,7 +198,7 @@ async function handleRequest(msg: { id: string; type: string; payload: unknown }
       }
 
       case 'SET_PROVING_STRATEGY': {
-        const strategy = data['strategy'] as ProvingStrategy;
+        const strategy = decodeProvingStrategy(data['strategy']);
         walletManager.setProvingStrategy(strategy);
         sendResponse(id, { success: true });
         break;
@@ -210,10 +211,12 @@ async function handleRequest(msg: { id: string; type: string; payload: unknown }
       }
 
       case 'RUN_BENCHMARK': {
-        const { runBenchmark } = await import('./benchmark');
-        const { createKeyMaterialProvider } = await import('./keyMaterialProvider');
-        const provider = createKeyMaterialProvider(emit);
-        const benchmark = await runBenchmark(provider);
+        const benchmark = await withTxQueue(async () => {
+          const { runBenchmark } = await import('./benchmark');
+          const { createKeyMaterialProvider } = await import('./keyMaterialProvider');
+          const provider = createKeyMaterialProvider(emit);
+          return runBenchmark(provider);
+        });
         sendResponse(id, benchmark);
         break;
       }

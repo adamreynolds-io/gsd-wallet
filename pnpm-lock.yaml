@@ -14,6 +14,9 @@ importers:
       '@midnight-ntwrk/ledger-v8':
         specifier: 8.0.3
         version: 8.0.3
+      '@midnight-ntwrk/wallet-sdk-capabilities':
+        specifier: 3.2.0
+        version: 3.2.0(ws@8.20.0)
       '@midnight-ntwrk/wallet-sdk-facade':
         specifier: 3.0.0
         version: 3.0.0(ws@8.20.0)

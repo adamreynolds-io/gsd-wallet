@@ -140,8 +140,9 @@ export function createCompositeProvingService(config: CompositeProvingServiceCon
     async prove(transaction) {
       const { kThreshold } = currentStrategy;
 
+      try {
       if (kThreshold === 0) {
-        return proveWithServer(transaction, 'server-only', 'server');
+        return await proveWithServer(transaction, 'server-only', 'server');
       }
 
       if (kThreshold === Infinity) {
@@ -185,6 +186,10 @@ export function createCompositeProvingService(config: CompositeProvingServiceCon
           error: err instanceof Error ? err.message : String(err),
         });
         throw err;
+      }
+      } finally {
+        // Reset to idle so the UI clears the proving indicator
+        emitStatus({ phase: 'idle', activeProver: null });
       }
     },
   };

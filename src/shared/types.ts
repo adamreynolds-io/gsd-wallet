@@ -222,6 +222,25 @@ export interface DeviceBenchmark {
 
 export const DEFAULT_PROVING_STRATEGY: ProvingStrategy = { kThreshold: 17 };
 
+/** Encode for JSON/chrome.storage (Infinity → -1 sentinel). */
+export function encodeProvingStrategy(s: ProvingStrategy): { kThreshold: number } {
+  return { kThreshold: s.kThreshold === Infinity ? -1 : s.kThreshold };
+}
+
+/** Decode from JSON/chrome.storage (-1 sentinel → Infinity). */
+export function decodeProvingStrategy(raw: unknown): ProvingStrategy {
+  if (
+    typeof raw === 'object' && raw !== null &&
+    'kThreshold' in raw
+  ) {
+    const k = (raw as { kThreshold: unknown }).kThreshold;
+    if (typeof k === 'number' && !Number.isNaN(k)) {
+      return { kThreshold: k === -1 ? Infinity : k };
+    }
+  }
+  return DEFAULT_PROVING_STRATEGY;
+}
+
 // --- Network Event Cache ---
 
 export type NetworkEventType = 'zswap' | 'dust';

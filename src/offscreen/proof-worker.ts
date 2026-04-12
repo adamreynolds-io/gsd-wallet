@@ -36,14 +36,15 @@ const keyMaterialProvider = {
         const decoded = Schema.decodeUnknownSync(InboundMessageSchema)(data) as InboundMessage;
         if (decoded.op === 'lookupKey' && decoded.keyLocation === keyLocation) {
           removeEventListener('message', handler);
+          clearTimeout(timer);
           resolve(decoded.result);
         }
       };
       addEventListener('message', handler);
-      setTimeout(
-        () => reject(new Error(`Promise timed out for lookupKey: ${keyLocation}`)),
-        MAX_TIME_TO_PROCESS,
-      );
+      const timer = setTimeout(() => {
+        removeEventListener('message', handler);
+        reject(new Error(`Promise timed out for lookupKey: ${keyLocation}`));
+      }, MAX_TIME_TO_PROCESS);
     });
   },
 
@@ -54,14 +55,15 @@ const keyMaterialProvider = {
         const decoded = Schema.decodeUnknownSync(InboundMessageSchema)(data) as InboundMessage;
         if (decoded.op === 'getParams' && decoded.k === k) {
           removeEventListener('message', handler);
+          clearTimeout(timer);
           resolve(decoded.result);
         }
       };
       addEventListener('message', handler);
-      setTimeout(
-        () => reject(new Error(`Promise timed out for getParams: ${k}`)),
-        MAX_TIME_TO_PROCESS,
-      );
+      const timer = setTimeout(() => {
+        removeEventListener('message', handler);
+        reject(new Error(`Promise timed out for getParams: ${k}`));
+      }, MAX_TIME_TO_PROCESS);
     });
   },
 };

@@ -118,6 +118,9 @@ export function createKeyMaterialProvider(emit: EmitFn): KeyMaterialProvider {
   }
 
   async function getParams(k: number): Promise<Uint8Array> {
+    if (!Number.isInteger(k) || k < 1 || k > 64) {
+      throw new Error(`Invalid k value: ${k}`);
+    }
     const cacheKey = `params-${k}`;
 
     const cached = memCache.get(cacheKey);

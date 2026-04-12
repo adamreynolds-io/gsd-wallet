@@ -9,6 +9,10 @@ import type {
   TransactionResult,
   TxHistoryEntry,
 } from '@shared/types';
+import {
+  encodeProvingStrategy,
+  decodeProvingStrategy,
+} from '@shared/types';
 import { getCachedUpdate } from './updateChecker';
 import * as stateManager from './stateManager';
 import * as offscreenClient from './offscreenClient';
@@ -423,6 +427,7 @@ export async function handlePopupMessage(
 
       case 'SWITCH_WALLET': {
         try {
+          chrome.storage.session.remove(['gsdProvingStatus']);
           await offscreenClient.request('END_SOCKET_SESSION', null).catch(() => { /* no session */ });
           const walletSessionCount = sessions.size;
           sessions.clear();
@@ -453,6 +458,7 @@ export async function handlePopupMessage(
       }
 
       case 'SWITCH_ENVIRONMENT': {
+        chrome.storage.session.remove(['gsdProvingStatus']);
         await offscreenClient.request('END_SOCKET_SESSION', null).catch(() => { /* no session */ });
         // Invalidate all dApp sessions — they hold the old networkId
         const sessionCount = sessions.size;
@@ -642,7 +648,7 @@ export async function handlePopupMessage(
           'SET_PROVING_STRATEGY', { strategy: msg.strategy },
         );
         await chrome.storage.local.set({
-          gsdProvingStrategy: msg.strategy,
+          gsdProvingStrategy: encodeProvingStrategy(msg.strategy),
         });
         send({ type: 'PROVING_STRATEGY', strategy: msg.strategy });
         break;
@@ -658,10 +664,12 @@ export async function handlePopupMessage(
           const stored = await chrome.storage.local.get(
             'gsdProvingStrategy',
           );
-          const strategy = (
-            stored['gsdProvingStrategy'] as ProvingStrategy
-          ) ?? { kThreshold: 17 };
-          send({ type: 'PROVING_STRATEGY', strategy });
+          send({
+            type: 'PROVING_STRATEGY',
+            strategy: decodeProvingStrategy(
+              stored['gsdProvingStrategy'],
+            ),
+          });
         }
         break;
       }

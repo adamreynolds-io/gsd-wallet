@@ -72,6 +72,7 @@ export function DustModal({ open, onClose, mode }: DustModalProps) {
   }
 
   async function handleSubmit() {
+    usePopupStore.getState().setProvingStatus(null);
     setStep('processing');
     setError(null);
 
