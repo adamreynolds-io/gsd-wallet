@@ -29,7 +29,8 @@ import { executeDustDeregistration } from '@core/dustDeregistration';
 import * as walletManager from './walletManager';
 import * as connectClient from './connectClient';
 import type { TransferRequest } from '@shared/messages';
-import type { TransactionResult } from '@shared/types';
+import type { TransactionResult, ProvingStrategy } from '@shared/types';
+import { decodeProvingStrategy } from '@shared/types';
 
 // Serializes transaction operations so concurrent requests don't race on wallet state
 let txQueue = Promise.resolve();
@@ -187,6 +188,35 @@ async function handleRequest(msg: { id: string; type: string; payload: unknown }
           connectClient.setActiveSession(sessionId);
         }
         sendResponse(id, { success: true });
+        break;
+      }
+
+      case 'CANCEL_WASM_PROVE': {
+        const cancelled = walletManager.cancelCurrentWasmProve();
+        sendResponse(id, { cancelled });
+        break;
+      }
+
+      case 'SET_PROVING_STRATEGY': {
+        const strategy = decodeProvingStrategy(data['strategy']);
+        walletManager.setProvingStrategy(strategy);
+        sendResponse(id, { success: true });
+        break;
+      }
+
+      case 'GET_PROVING_STRATEGY': {
+        const strategy = walletManager.getProvingStrategy();
+        sendResponse(id, { strategy });
+        break;
+      }
+
+      case 'RUN_BENCHMARK': {
+        const benchmark = await withTxQueue(async () => {
+          const { runBenchmark } = await import('./benchmark');
+          const { createKeyMaterialProvider } = await import('./keyMaterialProvider');
+          return runBenchmark(createKeyMaterialProvider(emit));
+        });
+        sendResponse(id, benchmark);
         break;
       }
 

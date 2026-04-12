@@ -15,8 +15,11 @@ import { makeCachingShieldedSyncService, makeBulkReplayShieldedSyncCapability, m
 import { makeCachingDustSyncService, makeBulkReplayDustSyncCapability, makeSkipReplayDustSyncCapability } from './cachingDustSyncService';
 import { getMaxEventId } from '@shared/storage';
 import { CustomDustWallet } from './customDustWallet';
-import { makeServerProvingService } from '@midnight-ntwrk/wallet-sdk-capabilities';
 import type { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
+import { createCompositeProvingService } from './compositeProvingService';
+import { createKeyMaterialProvider } from './keyMaterialProvider';
+import type { ProvingStrategy, ProvingStatus } from '@shared/types';
+import { DEFAULT_PROVING_STRATEGY } from '@shared/types';
 import { MidnightBech32m, DustAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 import type {
   Environment,
@@ -64,6 +67,8 @@ let stateListeners: Array<(state: SerializedWalletState) => void> = [];
 let initializingPromise: Promise<void> | null = null;
 let proverReachable = false;
 let proverProbeInterval: ReturnType<typeof setInterval> | null = null;
+let compositeProver: ReturnType<typeof createCompositeProvingService> | null = null;
+let currentProvingStrategy: ProvingStrategy = DEFAULT_PROVING_STRATEGY;
 
 export function getActiveWallet(): ActiveWallet | null {
   return activeWallet;
@@ -377,6 +382,27 @@ async function initializeWalletCore(
     txHistoryStorage,
   };
 
+  const keyMaterialProvider = createKeyMaterialProvider(emit);
+  compositeProver = createCompositeProvingService({
+    serverUrl: new URL(effectiveConfig.provingServerUrl),
+    strategy: currentProvingStrategy,
+    onStatus: (status: ProvingStatus) => {
+      self.postMessage({ id: null, type: 'PROVING_STATUS', payload: status });
+      emit('info', 'proving', `Proving: ${status.phase}`, {
+        activeProver: status.activeProver,
+        kValue: status.kValue,
+        elapsed: status.elapsed,
+      });
+    },
+    onBenchmark: (benchmark) => {
+      self.postMessage({ id: null, type: 'BENCHMARK_RESULT', payload: benchmark });
+      emit('info', 'proving', 'Device benchmark recorded', {
+        k10TimeMs: benchmark.k10TimeMs,
+      });
+    },
+    keyMaterialProvider,
+  });
+
   emit('info', 'wallet', 'Creating WalletFacade', {
     networkId: effectiveConfig.networkId,
     indexer: effectiveConfig.indexerHttpUrl,
@@ -403,12 +429,7 @@ async function initializeWalletCore(
           ),
         dust: (cfg) =>
           CustomDustWallet(cfg, makeDustBuilder(environment)).restore(checkpoint.dustState),
-        provingService: () =>
-          makeServerProvingService({
-            provingServerUrl: new URL(
-              effectiveConfig.provingServerUrl,
-            ),
-          }),
+        provingService: () => compositeProver!.provingService,
       });
     } catch (restoreErr) {
       emit(
@@ -433,12 +454,7 @@ async function initializeWalletCore(
             derivedKeys[Roles.Dust],
             ledger.LedgerParameters.initialParameters().dust,
           ),
-        provingService: () =>
-          makeServerProvingService({
-            provingServerUrl: new URL(
-              effectiveConfig.provingServerUrl,
-            ),
-          }),
+        provingService: () => compositeProver!.provingService,
       });
     }
   } else {
@@ -466,12 +482,7 @@ async function initializeWalletCore(
           derivedKeys[Roles.Dust],
           ledger.LedgerParameters.initialParameters().dust,
         ),
-      provingService: () =>
-        makeServerProvingService({
-          provingServerUrl: new URL(
-            effectiveConfig.provingServerUrl,
-          ),
-        }),
+      provingService: () => compositeProver!.provingService,
     });
   }
   emit('info', 'wallet', 'WalletFacade.init complete', undefined, Date.now() - facadeT0);
@@ -812,4 +823,17 @@ export function getLatestSerializedState(): SerializedWalletState | null {
     activeWallet.environment,
     activeWallet.accountIndex,
   );
+}
+
+export function cancelCurrentWasmProve(): boolean {
+  return compositeProver?.cancelCurrentProve() ?? false;
+}
+
+export function setProvingStrategy(strategy: ProvingStrategy): void {
+  currentProvingStrategy = strategy;
+  compositeProver?.setStrategy(strategy);
+}
+
+export function getProvingStrategy(): ProvingStrategy {
+  return currentProvingStrategy;
 }

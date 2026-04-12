@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePopupStore } from '@popup/store/popupStore';
 import { getEnvironmentLabel } from '@shared/environments';
-import type { SerializedWalletState, SocketState } from '@shared/types';
+import type { DeviceBenchmark, ProvingStrategy, SerializedWalletState, SocketState } from '@shared/types';
 import { WalletMenu } from './WalletMenu';
 import { useSocketToggle } from '@popup/hooks/useSocketToggle';
 
@@ -54,6 +54,7 @@ export function Header() {
 
       <div className="flex items-center gap-1.5">
         <SocketToggle socketState={socketState} />
+        {isActive && <ProvingStrategySelector />}
         <a
           href="https://github.com/adamreynolds-io/gsd-wallet"
           target="_blank"
@@ -207,6 +208,131 @@ function SocketIcon() {
       <path d="M9 2v3" />
       <path d="M15 2v3" />
       <rect x="5" y="12" width="14" height="4" rx="1" />
+    </svg>
+  );
+}
+
+const K_OPTIONS = [0, 17, 16, 15, 14, 13, 12, 11, 10, 9];
+
+function formatEstimatedTime(ms: number): string {
+  if (ms < 1000) return '<1s';
+  if (ms < 60_000) return `~${Math.round(ms / 1000)}s`;
+  return `~${Math.round(ms / 60_000)}m`;
+}
+
+function strategyLabel(kThreshold: number): string {
+  if (kThreshold === 0) return 'Server';
+  return `WASM \u2264${kThreshold}`;
+}
+
+function optionLabel(kThreshold: number, benchmark: DeviceBenchmark | null): string {
+  if (kThreshold === 0) return 'Server only';
+  const suffix = kThreshold === 9 ? '  (no dApp circuits)' : '';
+  const base = `WASM \u2264${kThreshold}`;
+  if (!benchmark) return `${base}${suffix}`;
+  const est = benchmark.estimates[kThreshold];
+  const time = est !== undefined ? `  ${formatEstimatedTime(est)}` : '';
+  return `${base}${time}${suffix}`;
+}
+
+function sendStrategyMessage(strategy: ProvingStrategy, onUpdate: (s: ProvingStrategy) => void): void {
+  const port = chrome.runtime.connect({ name: 'gsd-popup' });
+  const timeout = setTimeout(() => port.disconnect(), 5000);
+  port.onMessage.addListener((msg: { type: string; strategy?: ProvingStrategy }) => {
+    if (msg.type === 'PROVING_STRATEGY' && msg.strategy) {
+      clearTimeout(timeout);
+      onUpdate(msg.strategy);
+      port.disconnect();
+    } else if (msg.type === 'ERROR') {
+      clearTimeout(timeout);
+      port.disconnect();
+    }
+  });
+  port.postMessage({ type: 'SET_PROVING_STRATEGY', strategy });
+}
+
+function ProvingStrategySelector() {
+  const provingStrategy = usePopupStore((s) => s.provingStrategy);
+  const provingStatus = usePopupStore((s) => s.provingStatus);
+  const deviceBenchmark = usePopupStore((s) => s.deviceBenchmark);
+  const setProvingStrategy = usePopupStore((s) => s.setProvingStrategy);
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  const isProving = provingStatus !== null &&
+    provingStatus.phase !== 'idle' &&
+    provingStatus.phase !== 'done' &&
+    provingStatus.phase !== 'error' &&
+    provingStatus.phase !== 'cancelled';
+
+  const buttonLabel = strategyLabel(provingStrategy.kThreshold);
+
+  function handleSelect(kThreshold: number) {
+    setOpen(false);
+    sendStrategyMessage({ kThreshold }, setProvingStrategy);
+  }
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors
+          hover:bg-midnight-600
+          ${isProving ? 'text-fuchsia-400 animate-pulse' : 'text-gray-400 hover:text-white'}`}
+        title="Proving strategy — select WASM vs server threshold"
+      >
+        <ChipIcon />
+        <span className="font-mono">{buttonLabel}</span>
+      </button>
+      {open && (
+        <div role="listbox" className="absolute right-0 top-full mt-1 bg-midnight-700 border border-midnight-500 rounded shadow-lg z-50 min-w-[180px]">
+          {K_OPTIONS.map((k) => {
+            const selected = provingStrategy.kThreshold === k;
+            return (
+              <button
+                key={k}
+                role="option"
+                aria-selected={selected}
+                onClick={() => handleSelect(k)}
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between gap-2 transition-colors
+                  hover:bg-midnight-600
+                  ${selected ? 'text-white' : 'text-gray-300'}`}
+              >
+                <span className="font-mono">{optionLabel(k, deviceBenchmark)}</span>
+                {selected && (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChipIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="7" y="7" width="10" height="10" rx="1" />
+      <path d="M7 9H4M7 12H4M7 15H4M17 9h3M17 12h3M17 15h3M9 7V4M12 7V4M15 7V4M9 17v3M12 17v3M15 17v3" />
     </svg>
   );
 }

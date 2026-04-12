@@ -170,12 +170,13 @@ export type DiagnosticCategory =
   | 'indexer'
   | 'storage'
   | 'error'
-  | 'connect';
+  | 'connect'
+  | 'proving';
 
 export const DIAGNOSTIC_LEVELS: readonly DiagnosticLevel[] = ['debug', 'info', 'warn', 'error'];
 
 export const DIAGNOSTIC_CATEGORIES: readonly DiagnosticCategory[] = [
-  'sw', 'wallet', 'state', 'sync', 'sdk', 'dapp', 'api', 'popup', 'tx', 'indexer', 'storage', 'error', 'connect',
+  'sw', 'wallet', 'state', 'sync', 'sdk', 'dapp', 'api', 'popup', 'tx', 'indexer', 'storage', 'error', 'connect', 'proving',
 ];
 
 export interface DiagnosticEvent {
@@ -186,6 +187,58 @@ export interface DiagnosticEvent {
   message: string;
   data?: unknown;
   elapsed?: number;
+}
+
+// --- Proving ---
+
+export type ProvingMode = 'wasm' | 'server';
+
+/**
+ * kThreshold controls which proofs go to WASM vs server:
+ * - Infinity: all proofs via WASM (no server needed)
+ * - 17: WASM for k<=17, server for k>=18
+ * - 15: WASM for k<=15, server for k>=16
+ * - 0: all proofs via server (WASM disabled)
+ */
+export interface ProvingStrategy {
+  kThreshold: number;
+}
+
+export interface ProvingStatus {
+  phase: 'idle' | 'loading-keys' | 'proving' | 'submitting' | 'done' | 'cancelled' | 'error';
+  activeProver: ProvingMode | null;
+  kValue?: number;
+  elapsed?: number;
+  estimatedMs?: number;
+  method?: string;
+  error?: string;
+}
+
+export interface DeviceBenchmark {
+  k10TimeMs: number;
+  timestamp: number;
+  estimates: Record<number, number>;
+}
+
+export const DEFAULT_PROVING_STRATEGY: ProvingStrategy = { kThreshold: 17 };
+
+/** Encode for JSON/chrome.storage (Infinity → -1 sentinel). */
+export function encodeProvingStrategy(s: ProvingStrategy): { kThreshold: number } {
+  return { kThreshold: s.kThreshold === Infinity ? -1 : s.kThreshold };
+}
+
+/** Decode from JSON/chrome.storage (-1 sentinel → Infinity). */
+export function decodeProvingStrategy(raw: unknown): ProvingStrategy {
+  if (
+    typeof raw === 'object' && raw !== null &&
+    'kThreshold' in raw
+  ) {
+    const k = (raw as { kThreshold: unknown }).kThreshold;
+    if (typeof k === 'number' && !Number.isNaN(k)) {
+      return { kThreshold: k === -1 ? Infinity : k };
+    }
+  }
+  return DEFAULT_PROVING_STRATEGY;
 }
 
 // --- Network Event Cache ---

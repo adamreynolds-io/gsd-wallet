@@ -1,14 +1,17 @@
 import { create } from 'zustand';
 import type {
+  DeviceBenchmark,
   DiagnosticCategory,
   DiagnosticEvent,
   DiagnosticLevel,
+  ProvingStatus,
+  ProvingStrategy,
   SerializedWalletState,
   SocketState,
   WalletStatus,
   Environment,
 } from '@shared/types';
-import { DIAGNOSTIC_LEVELS, DIAGNOSTIC_CATEGORIES } from '@shared/types';
+import { DEFAULT_PROVING_STRATEGY, DIAGNOSTIC_LEVELS, DIAGNOSTIC_CATEGORIES } from '@shared/types';
 
 const MAX_DIAGNOSTIC_EVENTS = 2000;
 
@@ -56,6 +59,14 @@ interface PopupState {
   setUpdateAvailable: (info: { latestVersion: string; releaseUrl: string; downloadUrl: string }) => void;
 
   setSocketState: (state: SocketState) => void;
+
+  provingStatus: ProvingStatus | null;
+  provingStrategy: ProvingStrategy;
+  deviceBenchmark: DeviceBenchmark | null;
+
+  setProvingStatus: (status: ProvingStatus | null) => void;
+  setProvingStrategy: (strategy: ProvingStrategy) => void;
+  setDeviceBenchmark: (benchmark: DeviceBenchmark | null) => void;
 }
 
 export const usePopupStore = create<PopupState>((set) => ({
@@ -129,4 +140,12 @@ export const usePopupStore = create<PopupState>((set) => ({
   setUpdateAvailable: (info) => set({ updateAvailable: info }),
 
   setSocketState: (state) => set({ socketState: state }),
+
+  provingStatus: null,
+  provingStrategy: DEFAULT_PROVING_STRATEGY,
+  deviceBenchmark: null,
+
+  setProvingStatus: (provingStatus) => set({ provingStatus }),
+  setProvingStrategy: (provingStrategy) => set({ provingStrategy }),
+  setDeviceBenchmark: (deviceBenchmark) => set({ deviceBenchmark }),
 }));

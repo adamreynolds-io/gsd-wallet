@@ -14,6 +14,7 @@ type Step = 'select' | 'confirm' | 'processing' | 'result';
 
 export function DustModal({ open, onClose, mode }: DustModalProps) {
   const walletState = usePopupStore((s) => s.walletState);
+  const provingStatus = usePopupStore((s) => s.provingStatus);
   const [step, setStep] = useState<Step>('select');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [txId, setTxId] = useState<string | null>(null);
@@ -71,6 +72,7 @@ export function DustModal({ open, onClose, mode }: DustModalProps) {
   }
 
   async function handleSubmit() {
+    usePopupStore.getState().setProvingStatus(null);
     setStep('processing');
     setError(null);
 
@@ -187,9 +189,27 @@ export function DustModal({ open, onClose, mode }: DustModalProps) {
       {step === 'processing' && (
         <div className="flex flex-col items-center py-8 gap-4">
           <div className="w-10 h-10 border-4 border-accent-purple border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-gray-400">
-            {isRegister ? 'Registering UTXOs...' : 'Deregistering UTXOs...'}
-          </p>
+          {provingStatus?.activeProver === 'wasm' && provingStatus.phase === 'proving' ? (
+            <>
+              <p className="text-sm text-gray-400">Proving via WASM...</p>
+              <button
+                onClick={() => {
+                  const port = chrome.runtime.connect({ name: 'gsd-popup' });
+                  port.postMessage({ type: 'CANCEL_WASM_PROVE' });
+                  port.disconnect();
+                }}
+                className="text-xs text-blue-400 hover:text-blue-300 underline"
+              >
+                Use proof server instead
+              </button>
+            </>
+          ) : provingStatus?.phase === 'cancelled' ? (
+            <p className="text-sm text-gray-400">Retrying with proof server...</p>
+          ) : (
+            <p className="text-sm text-gray-400">
+              {isRegister ? 'Registering UTXOs...' : 'Deregistering UTXOs...'}
+            </p>
+          )}
         </div>
       )}
 
