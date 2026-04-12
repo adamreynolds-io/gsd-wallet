@@ -212,7 +212,7 @@ function SocketIcon() {
   );
 }
 
-const K_OPTIONS = [Infinity, 17, 16, 15, 14, 13, 12, 11, 10, 0];
+const K_OPTIONS = [0, 17, 16, 15, 14, 13, 12, 11, 10, 9];
 
 function formatEstimatedTime(ms: number): string {
   if (ms < 1000) return '<1s';
@@ -221,17 +221,15 @@ function formatEstimatedTime(ms: number): string {
 }
 
 function strategyLabel(kThreshold: number): string {
-  if (kThreshold === Infinity) return 'WASM';
   if (kThreshold === 0) return 'Server';
   return `WASM \u2264${kThreshold}`;
 }
 
 function optionLabel(kThreshold: number, benchmark: DeviceBenchmark | null): string {
-  const base = kThreshold === Infinity ? 'WASM (all)' :
-    kThreshold === 0 ? 'Server only' : `WASM \u2264${kThreshold}`;
-  if (kThreshold === 0 || !benchmark) return base;
-  const k = kThreshold === Infinity ? Math.max(...Object.keys(benchmark.estimates).map(Number)) : kThreshold;
-  const est = benchmark.estimates[k];
+  if (kThreshold === 0) return 'Server only';
+  const base = `WASM \u2264${kThreshold}`;
+  if (!benchmark) return base;
+  const est = benchmark.estimates[kThreshold];
   return est !== undefined ? `${base}  ${formatEstimatedTime(est)}` : base;
 }
 
