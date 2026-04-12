@@ -34,7 +34,7 @@ const recipe = getBalanceRecipe({
     inputFeeOverhead: 1000n,
     outputFeeOverhead: 500n,
   },
-  feeTokenType: 'DUST', // DUST is a resource (not a transferable token), consumed as fees
+  feeTokenType: 'DUST',
   createOutput: (coin) => ({ type: coin.type, value: coin.value }),
   isCoinEqual: (a, b) => a.id === b.id,
   coinSelection: chooseCoin, // Optional: defaults to smallest-first selection

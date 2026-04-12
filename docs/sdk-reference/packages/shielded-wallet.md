@@ -25,7 +25,7 @@ while maintaining verifiability. It provides:
 
 ```typescript
 import { ShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnight-ntwrk/ledger-v7';
 import { randomBytes } from 'node:crypto';
 
 // Configuration for the wallet

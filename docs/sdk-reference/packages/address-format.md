@@ -12,7 +12,7 @@ npm install @midnight-ntwrk/wallet-sdk-address-format
 
 This package provides Bech32m address formatting for the Midnight blockchain. It supports encoding and decoding of
 various address types including shielded addresses (for ZK transactions), unshielded addresses (for transparent
-transactions), and dust addresses (for fee payment).
+transactions), and dust addresses (for fee tokens).
 
 Key features:
 
@@ -30,7 +30,7 @@ For transparent transactions on the Midnight network.
 ```typescript
 import { UnshieldedAddress, MidnightBech32m, mainnet } from '@midnight-ntwrk/wallet-sdk-address-format';
 import type { NetworkId } from '@midnight-ntwrk/wallet-sdk-address-format';
-import { addressFromKey, signatureVerifyingKey } from '@midnight-ntwrk/ledger-v8';
+import { addressFromKey, signatureVerifyingKey } from '@midnight-ntwrk/ledger-v7';
 import { randomBytes } from 'node:crypto';
 
 const networkId: NetworkId = 'preview';
@@ -66,7 +66,7 @@ import {
   MidnightBech32m,
 } from '@midnight-ntwrk/wallet-sdk-address-format';
 import type { NetworkId } from '@midnight-ntwrk/wallet-sdk-address-format';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnight-ntwrk/ledger-v7';
 import { randomBytes } from 'node:crypto';
 
 const networkId: NetworkId = 'preview';
@@ -94,12 +94,12 @@ decoded.encryptionPublicKeyString();
 
 ### Dust Address
 
-For dust (fee payment) operations on the Midnight network.
+For fee token operations on the Midnight network.
 
 ```typescript
 import { DustAddress, MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
 import type { NetworkId } from '@midnight-ntwrk/wallet-sdk-address-format';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnight-ntwrk/ledger-v7';
 import { randomBytes } from 'node:crypto';
 
 const networkId: NetworkId = 'preview';
@@ -140,7 +140,7 @@ mn_<type>[_<network>]1<data>
 | Encryption Key    | `shield-epk`  | Shielded encryption public key only                        |
 | Encryption Secret | `shield-esk`  | Shielded encryption secret key                             |
 | Unshielded        | `addr`        | Public address for transparent transactions                |
-| Dust              | `dust`        | Address for dust (fee payment) operations                  |
+| Dust              | `dust`        | Address for fee token operations                           |
 
 ## Exports
 
@@ -156,7 +156,7 @@ mn_<type>[_<network>]1<data>
 - `ShieldedEncryptionPublicKey` - 32-byte encryption public key
 - `ShieldedEncryptionSecretKey` - Encryption secret key wrapper
 - `UnshieldedAddress` - 32-byte transparent address
-- `DustAddress` - Dust address (fee payment) using BLS scalar
+- `DustAddress` - Fee token address using BLS scalar
 
 ### Types and Constants
 
