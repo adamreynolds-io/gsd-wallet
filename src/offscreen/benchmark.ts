@@ -1,11 +1,42 @@
+import { prove } from '@midnight-ntwrk/zkir-v2';
+import type { KeyMaterialProvider } from '@midnight-ntwrk/zkir-v2';
 import type { DeviceBenchmark } from '@shared/types';
 
 const BENCHMARK_K = 10;
+const PREIMAGE_PATH = 'data/proving/benchmark-k10.preimage';
+
+/**
+ * Runs a device benchmark by proving a bundled k=10 preimage via WASM.
+ * Extrapolates estimates for k=9 through k=20 via the doubling model.
+ *
+ * @param keyMaterialProvider Provider for BLS params and proving keys.
+ */
+export async function runBenchmark(
+  keyMaterialProvider: KeyMaterialProvider,
+): Promise<DeviceBenchmark> {
+  const url = `${self.location.origin}/${PREIMAGE_PATH}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Benchmark preimage not found at ${PREIMAGE_PATH}. ` +
+      'Run scripts/fetch-proving-data.sh first.',
+    );
+  }
+  const preimage = new Uint8Array(await response.arrayBuffer());
+
+  // Pre-load BLS params so timing measures proving only
+  await keyMaterialProvider.getParams(BENCHMARK_K);
+
+  const t0 = Date.now();
+  await prove(preimage, keyMaterialProvider);
+  const k10TimeMs = Date.now() - t0;
+
+  return computeBenchmark(BENCHMARK_K, k10TimeMs);
+}
 
 /**
  * Computes a device benchmark from an observed WASM proof timing.
  * Uses the doubling model: time(k) = observedMs * 2^(k - observedK).
- * Normalizes to k=10 base, then extrapolates for k=9 through k=20.
  *
  * @param observedK The k-value of the observed proof.
  * @param observedMs Wall-clock milliseconds for the observed proof.
