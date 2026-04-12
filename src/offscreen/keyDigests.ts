@@ -3,6 +3,7 @@
 
 export const KEY_DIGESTS: Record<string, string> = {
   'benchmark-k10.preimage': '973e37eae13b79d875565c642175e5d2f80c345c2c44358eedd6e15335c3fc4d',
+  'benchmark-k11.preimage': '51500b8b04a1ef442b6af0c372db3e4eebdbbded0b2b53da9611cbb55f7154e4',
   'bls_midnight_2p10': '46b2290933cbed4c378889e4ba971f1a92888331ffb09466acd4ff61a1e2cb42',
   'bls_midnight_2p11': '9901589d7956ff58be0d85569b2f455b77b58c3758026ffb5bbe4807000b96d1',
   'bls_midnight_2p12': 'ef08eb3fcf62df8f72c515cffa027e681808b530cb016eea104115545ef6d5c8',

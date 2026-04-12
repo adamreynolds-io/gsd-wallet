@@ -33,11 +33,14 @@ import {
 } from "@midnight-ntwrk/midnight-js-types";
 import { parseCoinPublicKeyToHex } from "@midnight-ntwrk/midnight-js-utils";
 
-const CIRCUIT_ID = "bench_k10";
+const CIRCUITS = [
+  { id: "bench_k10", k: 10 },
+  { id: "bench_k11", k: 11 },
+];
 const CONTRACT_DIR = join(import.meta.dirname, "bench/benchmark-compiled");
-const OUTPUT = join(
+const OUTPUT_DIR = join(
   import.meta.dirname,
-  "../gsd-wallet/public/data/proving/benchmark-k10.preimage",
+  "../gsd-wallet/public/data/proving",
 );
 
 class BenchZKConfigProvider extends ZKConfigProvider {
@@ -77,42 +80,43 @@ async function main() {
     ),
   );
 
-  const result = await createUnprovenCallTxFromInitialStates(
-    new BenchZKConfigProvider(),
-    {
-      compiledContract: CompiledContract.make(
-        "benchmark",
-        contractModule.Contract,
-      ).pipe(
-        CompiledContract.withWitnesses({
-          getSecret: (ctx) => [ctx.privateState, dummySecret],
-        }),
-      ),
-      circuitId: CIRCUIT_ID,
-      contractAddress: sampleContractAddress(),
-      coinPublicKey,
-      initialContractState: constructorResult.currentContractState,
-      initialZswapChainState: new ZswapChainState(),
-      ledgerParameters: LedgerParameters.initialParameters(),
-      args: [],
-    },
-    sampleEncryptionPublicKey(),
-  );
+  mkdirSync(OUTPUT_DIR, { recursive: true });
 
-  const preimage = proofDataIntoSerializedPreimage(
-    result.private.input,
-    result.private.output,
-    result.public.publicTranscript,
-    result.private.privateTranscriptOutputs,
-    CIRCUIT_ID,
-  );
+  for (const { id, k } of CIRCUITS) {
+    const result = await createUnprovenCallTxFromInitialStates(
+      new BenchZKConfigProvider(),
+      {
+        compiledContract: CompiledContract.make(
+          "benchmark",
+          contractModule.Contract,
+        ).pipe(
+          CompiledContract.withWitnesses({
+            getSecret: (ctx) => [ctx.privateState, dummySecret],
+          }),
+        ),
+        circuitId: id,
+        contractAddress: sampleContractAddress(),
+        coinPublicKey,
+        initialContractState: constructorResult.currentContractState,
+        initialZswapChainState: new ZswapChainState(),
+        ledgerParameters: LedgerParameters.initialParameters(),
+        args: [],
+      },
+      sampleEncryptionPublicKey(),
+    );
 
-  mkdirSync(join(OUTPUT, ".."), { recursive: true });
-  writeFileSync(OUTPUT, preimage);
+    const preimage = proofDataIntoSerializedPreimage(
+      result.private.input,
+      result.private.output,
+      result.public.publicTranscript,
+      result.private.privateTranscriptOutputs,
+      id,
+    );
 
-  const header = new TextDecoder().decode(preimage.slice(0, 60));
-  console.log(`Wrote ${preimage.length} bytes to ${OUTPUT}`);
-  console.log(`Header: ${header}`);
+    const outPath = join(OUTPUT_DIR, `benchmark-k${k}.preimage`);
+    writeFileSync(outPath, preimage);
+    console.log(`k=${k}: ${preimage.length} bytes -> ${outPath}`);
+  }
 }
 
 main().catch((err) => {
