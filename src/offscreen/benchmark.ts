@@ -1,46 +1,30 @@
-import { prove, Zkir, jsonIrToBinary } from '@midnight-ntwrk/zkir-v2';
-import type { KeyMaterialProvider } from '@midnight-ntwrk/zkir-v2';
 import type { DeviceBenchmark } from '@shared/types';
 
 const BENCHMARK_K = 10;
-const BENCHMARK_ZKIR_PATH = 'data/proving/benchmark-k10.zkir';
 
 /**
- * Runs a device benchmark to measure WASM proving speed.
- * Loads a k=10 ZKIR circuit, converts to binary preimage, proves it,
- * then extrapolates estimates for k=9 through k=20.
+ * Computes a device benchmark from an observed WASM proof timing.
+ * Uses the doubling model: time(k) = observedMs * 2^(k - observedK).
+ * Normalizes to k=10 base, then extrapolates for k=9 through k=20.
  *
- * @param keyMaterialProvider Provider for BLS params and proving keys.
- * @returns Benchmark result with timing and extrapolated estimates.
+ * @param observedK The k-value of the observed proof.
+ * @param observedMs Wall-clock milliseconds for the observed proof.
  */
-export async function runBenchmark(
-  keyMaterialProvider: KeyMaterialProvider,
-): Promise<DeviceBenchmark> {
-  const zkirUrl = `${self.location.origin}/${BENCHMARK_ZKIR_PATH}`;
-  const response = await fetch(zkirUrl);
-  if (!response.ok) {
-    throw new Error(
-      `Benchmark ZKIR not found at ${BENCHMARK_ZKIR_PATH}. ` +
-      'Run scripts/fetch-proving-data.sh first.',
-    );
-  }
-  const zkirJson = await response.text();
-  const preimage = jsonIrToBinary(zkirJson);
-
-  // Pre-load BLS params so the timing measures proving only
-  await keyMaterialProvider.getParams(BENCHMARK_K);
-
-  const t0 = Date.now();
-  await prove(preimage, keyMaterialProvider);
-  const k10TimeMs = Date.now() - t0;
+export function computeBenchmark(
+  observedK: number,
+  observedMs: number,
+): DeviceBenchmark {
+  const k10TimeMs = observedMs / Math.pow(2, observedK - BENCHMARK_K);
 
   const estimates: Record<number, number> = {};
   for (let k = 9; k <= 20; k++) {
-    estimates[k] = k10TimeMs * Math.pow(2, k - BENCHMARK_K);
+    estimates[k] = Math.round(
+      k10TimeMs * Math.pow(2, k - BENCHMARK_K),
+    );
   }
 
   return {
-    k10TimeMs,
+    k10TimeMs: Math.round(k10TimeMs),
     timestamp: Date.now(),
     estimates,
   };

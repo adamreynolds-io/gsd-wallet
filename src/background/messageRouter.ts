@@ -91,6 +91,14 @@ export function setupMessageRouter(): void {
         try { port.postMessage(msg); } catch { /* */ }
       }
     }
+    if (broadcast.type === 'BENCHMARK_RESULT') {
+      const benchmark = broadcast.payload as DeviceBenchmark;
+      chrome.storage.local.set({ gsdDeviceBenchmark: benchmark });
+      const msg: PopupResponse = { type: 'BENCHMARK_RESULT', benchmark };
+      for (const port of connectedPorts) {
+        try { port.postMessage(msg); } catch { /* */ }
+      }
+    }
     if (broadcast.type === 'SOCKET_DAPP_REQUEST') {
       const { socketRequestId, dappPayload, origin } = broadcast.payload as {
         socketRequestId: string;

@@ -210,17 +210,6 @@ async function handleRequest(msg: { id: string; type: string; payload: unknown }
         break;
       }
 
-      case 'RUN_BENCHMARK': {
-        const benchmark = await withTxQueue(async () => {
-          const { runBenchmark } = await import('./benchmark');
-          const { createKeyMaterialProvider } = await import('./keyMaterialProvider');
-          const provider = createKeyMaterialProvider(emit);
-          return runBenchmark(provider);
-        });
-        sendResponse(id, benchmark);
-        break;
-      }
-
       default:
         sendError(id, `Unknown request type: ${type}`);
     }

@@ -2,7 +2,6 @@
 // Maps relative paths (under data/proving/) to SHA-256 hex digests
 
 export const KEY_DIGESTS: Record<string, string> = {
-  'benchmark-k10.zkir': '53ea5208e5594c4bd7c3be6ce9447fa019968ce5f7654afec9c7c9e0c4ee8289',
   'bls_midnight_2p10': '46b2290933cbed4c378889e4ba971f1a92888331ffb09466acd4ff61a1e2cb42',
   'bls_midnight_2p11': '9901589d7956ff58be0d85569b2f455b77b58c3758026ffb5bbe4807000b96d1',
   'bls_midnight_2p12': 'ef08eb3fcf62df8f72c515cffa027e681808b530cb016eea104115545ef6d5c8',

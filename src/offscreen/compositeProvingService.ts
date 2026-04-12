@@ -7,12 +7,14 @@ import type {
 } from '@midnight-ntwrk/wallet-sdk-capabilities/proving';
 import type { KeyMaterialProvider } from '@midnight-ntwrk/zkir-v2';
 import { makeLocalWasmProvingService } from './localWasmProver';
-import type { ProvingStrategy, ProvingStatus, ProvingMode } from '@shared/types';
+import type { DeviceBenchmark, ProvingStrategy, ProvingStatus, ProvingMode } from '@shared/types';
+import { computeBenchmark } from './benchmark';
 
 export interface CompositeProvingServiceConfig {
   serverUrl: URL;
   strategy: ProvingStrategy;
   onStatus: (status: ProvingStatus) => void;
+  onBenchmark: (benchmark: DeviceBenchmark) => void;
   keyMaterialProvider: KeyMaterialProvider;
 }
 
@@ -47,6 +49,7 @@ export function createCompositeProvingService(config: CompositeProvingServiceCon
 } {
   let currentStrategy = config.strategy;
   let abortController: AbortController | null = null;
+  let benchmarkRecorded = false;
 
   function emitStatus(status: ProvingStatus): void {
     config.onStatus(status);
@@ -95,13 +98,17 @@ export function createCompositeProvingService(config: CompositeProvingServiceCon
     const wasmService = makeLocalWasmProvingService({ keyMaterialProvider: trackingProvider });
     try {
       const result = await wasmService.prove(transaction);
-      const doneStatus: ProvingStatus = {
+      const elapsed = Date.now() - t0;
+      emitStatus({
         phase: 'done',
         activeProver: 'wasm',
-        elapsed: Date.now() - t0,
+        elapsed,
         ...(detectedK !== undefined ? { kValue: detectedK } : {}),
-      };
-      emitStatus(doneStatus);
+      });
+      if (!benchmarkRecorded && detectedK !== undefined && elapsed > 0) {
+        benchmarkRecorded = true;
+        config.onBenchmark(computeBenchmark(detectedK, elapsed));
+      }
       return result;
     } finally {
       abortController = null;

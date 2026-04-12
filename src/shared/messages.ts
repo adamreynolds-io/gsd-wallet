@@ -175,7 +175,7 @@ export interface OffscreenResponse {
 
 export interface OffscreenBroadcast {
   id: null;
-  type: 'STATE_UPDATE' | 'DIAGNOSTIC_EVENT' | 'HEARTBEAT' | 'READY' | 'CONNECT_EVENT' | 'SOCKET_STATE_CHANGE' | 'SOCKET_DAPP_REQUEST' | 'PROVING_STATUS';
+  type: 'STATE_UPDATE' | 'DIAGNOSTIC_EVENT' | 'HEARTBEAT' | 'READY' | 'CONNECT_EVENT' | 'SOCKET_STATE_CHANGE' | 'SOCKET_DAPP_REQUEST' | 'PROVING_STATUS' | 'BENCHMARK_RESULT';
   payload: unknown;
 }
 

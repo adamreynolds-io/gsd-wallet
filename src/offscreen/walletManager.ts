@@ -394,6 +394,12 @@ async function initializeWalletCore(
         elapsed: status.elapsed,
       });
     },
+    onBenchmark: (benchmark) => {
+      self.postMessage({ id: null, type: 'BENCHMARK_RESULT', payload: benchmark });
+      emit('info', 'proving', 'Device benchmark recorded', {
+        k10TimeMs: benchmark.k10TimeMs,
+      });
+    },
     keyMaterialProvider,
   });
 

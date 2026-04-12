@@ -133,19 +133,6 @@ rehydrate().then(async () => {
   }
 
   await autoUnlockWallet();
-
-  // Run WASM benchmark on first install (populates strategy dropdown times)
-  const benchmarkResult = await chrome.storage.local.get('gsdDeviceBenchmark');
-  if (!benchmarkResult['gsdDeviceBenchmark']) {
-    offscreenClient.request('RUN_BENCHMARK', null)
-      .then(async (benchmark) => {
-        await chrome.storage.local.set({ gsdDeviceBenchmark: benchmark });
-        emit('info', 'proving', 'Device benchmark complete', benchmark as Record<string, unknown>);
-      })
-      .catch((err) => {
-        emit('warn', 'proving', 'Device benchmark failed', { error: String(err) });
-      });
-  }
 }).catch((err) => {
   emit('error', 'sw', 'Failed during SW init', { error: String(err) });
 });
