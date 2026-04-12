@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { PopupResponse } from '@shared/messages';
-import type { SerializedWalletState } from '@shared/types';
+import type { ProvingStatus, SerializedWalletState } from '@shared/types';
 import { usePopupStore } from '@popup/store/popupStore';
 
 function handleMessage(msg: PopupResponse): void {
@@ -24,6 +24,12 @@ function handleMessage(msg: PopupResponse): void {
     });
   } else if (msg.type === 'CONNECT_STATUS') {
     store.setSocketState(msg.state);
+  } else if (msg.type === 'PROVING_STATUS') {
+    store.setProvingStatus(msg.status);
+  } else if (msg.type === 'PROVING_STRATEGY') {
+    store.setProvingStrategy(msg.strategy);
+  } else if (msg.type === 'BENCHMARK_RESULT') {
+    store.setDeviceBenchmark(msg.benchmark);
   }
 }
 
@@ -76,6 +82,8 @@ export function useWalletConnection(): void {
       port.postMessage({ type: 'GET_STATE' });
       port.postMessage({ type: 'GET_DIAGNOSTIC_BACKLOG' });
       port.postMessage({ type: 'GET_CONNECT_STATUS' });
+      port.postMessage({ type: 'GET_PROVING_STRATEGY' });
+      port.postMessage({ type: 'GET_BENCHMARK' });
     }
 
     // Check if wallets exist
@@ -92,8 +100,10 @@ export function useWalletConnection(): void {
       },
     );
 
-    // Read cached session state (wallet, socket, environment)
-    chrome.storage.session.get(['gsdEnvironment', 'gsdLastState', 'gsdSocketState']).then((result) => {
+    // Read cached session state (wallet, socket, environment, proving status)
+    chrome.storage.session.get(
+      ['gsdEnvironment', 'gsdLastState', 'gsdSocketState', 'gsdProvingStatus'],
+    ).then((result) => {
       const store = usePopupStore.getState();
       if (result['gsdLastState'] && !store.walletState) {
         store.setWalletState(result['gsdLastState'] as SerializedWalletState);
@@ -106,6 +116,9 @@ export function useWalletConnection(): void {
       const cachedSocketState = result['gsdSocketState'] as import('@shared/types').SocketState | undefined;
       if (cachedSocketState) {
         store.setSocketState(cachedSocketState);
+      }
+      if (result['gsdProvingStatus']) {
+        store.setProvingStatus(result['gsdProvingStatus'] as ProvingStatus);
       }
     });
 
@@ -131,6 +144,10 @@ export function useWalletConnection(): void {
         if (changes['gsdSocketState']?.newValue) {
           const store = usePopupStore.getState();
           store.setSocketState(changes['gsdSocketState'].newValue as import('@shared/types').SocketState);
+        }
+        if (changes['gsdProvingStatus']?.newValue) {
+          const store = usePopupStore.getState();
+          store.setProvingStatus(changes['gsdProvingStatus'].newValue as ProvingStatus);
         }
       }
       if (area === 'local') {

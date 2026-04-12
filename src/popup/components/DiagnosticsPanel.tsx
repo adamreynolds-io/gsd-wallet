@@ -267,6 +267,13 @@ export function DiagnosticsPanel({ onInspect }: DiagnosticsPanelProps) {
   );
 }
 
+function isActiveWasmProving(event: DiagnosticEvent): boolean {
+  if (event.category !== 'proving') return false;
+  if (!event.message.toLowerCase().includes('proving')) return false;
+  const data = event.data as Record<string, unknown> | null | undefined;
+  return data?.['activeProver'] === 'wasm';
+}
+
 function EventRow({ event, expandCollapseSignal, onInspect }: {
   event: DiagnosticEvent;
   expandCollapseSignal: { action: 'expand' | 'collapse'; tick: number };
@@ -379,6 +386,20 @@ function EventRow({ event, expandCollapseSignal, onInspect }: {
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
               tx.json
+            </button>
+          )}
+          {isActiveWasmProving(event) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const port = chrome.runtime.connect({ name: 'gsd-popup' });
+                port.postMessage({ type: 'CANCEL_WASM_PROVE' });
+                port.disconnect();
+              }}
+              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 hover:text-white"
+              title="Cancel WASM prove and fall back to proof server"
+            >
+              Cancel &rarr; Server
             </button>
           )}
         </div>
