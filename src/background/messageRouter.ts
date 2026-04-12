@@ -1,5 +1,14 @@
 import type { ConnectEventPayload, PopupRequest, PopupResponse } from '@shared/messages';
-import type { DiagnosticEvent, SerializedWalletState, SocketState, TransactionResult, TxHistoryEntry } from '@shared/types';
+import type {
+  DeviceBenchmark,
+  DiagnosticEvent,
+  ProvingStatus,
+  ProvingStrategy,
+  SerializedWalletState,
+  SocketState,
+  TransactionResult,
+  TxHistoryEntry,
+} from '@shared/types';
 import { getCachedUpdate } from './updateChecker';
 import * as stateManager from './stateManager';
 import * as offscreenClient from './offscreenClient';
@@ -66,6 +75,14 @@ export function setupMessageRouter(): void {
       // Persist so popup picks it up on reopen
       chrome.storage.session.set({ gsdSocketState: state }).catch(() => { /* best-effort persist */ });
       const msg: PopupResponse = { type: 'CONNECT_STATUS', state, ...(sessionId !== undefined ? { sessionId } : {}) };
+      for (const port of connectedPorts) {
+        try { port.postMessage(msg); } catch { /* */ }
+      }
+    }
+    if (broadcast.type === 'PROVING_STATUS') {
+      const status = broadcast.payload as ProvingStatus;
+      chrome.storage.session.set({ gsdProvingStatus: status });
+      const msg: PopupResponse = { type: 'PROVING_STATUS', status };
       for (const port of connectedPorts) {
         try { port.postMessage(msg); } catch { /* */ }
       }
@@ -180,6 +197,18 @@ export function setupMessageRouter(): void {
           downloadUrl: update.downloadUrl,
         } satisfies PopupResponse);
       }
+
+      // Send cached proving status to newly connected popup
+      chrome.storage.session.get('gsdProvingStatus').then((cached) => {
+        if (cached['gsdProvingStatus']) {
+          try {
+            port.postMessage({
+              type: 'PROVING_STATUS',
+              status: cached['gsdProvingStatus'] as ProvingStatus,
+            } satisfies PopupResponse);
+          } catch { /* */ }
+        }
+      });
     } else if (port.name === 'gsd-dapp') {
       port.onMessage.addListener((msg) => {
         if (msg.type !== 'DAPP_REQUEST') return;
@@ -605,6 +634,68 @@ export async function handlePopupMessage(
           utxoIds: msg.utxoIds,
         }) as TransactionResult;
         send({ type: 'DUST_DEREGISTER_RESULT', result: deregResult });
+        break;
+      }
+
+      case 'SET_PROVING_STRATEGY': {
+        await offscreenClient.request(
+          'SET_PROVING_STRATEGY', { strategy: msg.strategy },
+        );
+        await chrome.storage.local.set({
+          gsdProvingStrategy: msg.strategy,
+        });
+        send({ type: 'PROVING_STRATEGY', strategy: msg.strategy });
+        break;
+      }
+
+      case 'GET_PROVING_STRATEGY': {
+        try {
+          const result = await offscreenClient.request(
+            'GET_PROVING_STRATEGY', null,
+          ) as { strategy: ProvingStrategy };
+          send({ type: 'PROVING_STRATEGY', strategy: result.strategy });
+        } catch {
+          const stored = await chrome.storage.local.get(
+            'gsdProvingStrategy',
+          );
+          const strategy = (
+            stored['gsdProvingStrategy'] as ProvingStrategy
+          ) ?? { kThreshold: 17 };
+          send({ type: 'PROVING_STRATEGY', strategy });
+        }
+        break;
+      }
+
+      case 'RUN_BENCHMARK': {
+        const benchmark = await offscreenClient.request(
+          'RUN_BENCHMARK', null,
+        ) as DeviceBenchmark;
+        await chrome.storage.local.set({
+          gsdDeviceBenchmark: benchmark,
+        });
+        send({ type: 'BENCHMARK_RESULT', benchmark });
+        break;
+      }
+
+      case 'GET_BENCHMARK': {
+        const stored = await chrome.storage.local.get(
+          'gsdDeviceBenchmark',
+        );
+        const benchmark = (
+          stored['gsdDeviceBenchmark'] as DeviceBenchmark
+        ) ?? null;
+        send({ type: 'BENCHMARK_RESULT', benchmark });
+        break;
+      }
+
+      case 'CANCEL_WASM_PROVE': {
+        const result = await offscreenClient.request(
+          'CANCEL_WASM_PROVE', null,
+        ) as { cancelled: boolean };
+        send({
+          type: 'WASM_PROVE_CANCELLED',
+          success: result.cancelled,
+        });
         break;
       }
 
