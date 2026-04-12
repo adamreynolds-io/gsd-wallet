@@ -36,6 +36,7 @@ const CATEGORY_COLORS: Record<DiagnosticCategory, string> = {
   storage: 'text-gray-500',
   error: 'text-red-400',
   connect: 'text-lime-400',
+  proving: 'text-fuchsia-400',
 };
 
 const LEVEL_LABELS: Record<DiagnosticLevel, string> = {
@@ -52,7 +53,7 @@ const LEVEL_TOOLTIPS: Record<DiagnosticLevel, string> = {
 const CATEGORY_SHORT: Record<DiagnosticCategory, string> = {
   sw: 'SW', wallet: 'Wal', state: 'Sta', sync: 'Sync', sdk: 'SDK',
   dapp: 'DApp', api: 'API', popup: 'Pop', tx: 'Tx',
-  indexer: 'Idx', storage: 'Sto', error: 'Err', connect: 'Conn',
+  indexer: 'Idx', storage: 'Sto', error: 'Err', connect: 'Conn', proving: 'Prv',
 };
 
 const CATEGORY_TOOLTIPS: Record<DiagnosticCategory, string> = {
@@ -69,6 +70,7 @@ const CATEGORY_TOOLTIPS: Record<DiagnosticCategory, string> = {
   storage: 'IndexedDB operations',
   error: 'Errors at any layer',
   connect: 'GSD Connect — trace events from external dApp or test harness',
+  proving: 'ZK proof generation — WASM/server routing, key material, benchmark',
 };
 
 interface DiagnosticsPanelProps {

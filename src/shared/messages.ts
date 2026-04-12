@@ -1,7 +1,10 @@
 import type {
+  DeviceBenchmark,
   DiagnosticEvent,
   DiagnosticLevel,
   Environment,
+  ProvingStatus,
+  ProvingStrategy,
   SerializedWalletState,
   SocketState,
   TransactionResult,
@@ -68,7 +71,12 @@ export type PopupRequest =
   | { type: 'EXPORT_CACHE' }
   | { type: 'SET_CONNECT_URL'; url: string }
   | { type: 'GET_CONNECT_STATUS' }
-  | { type: 'END_SOCKET_SESSION' };
+  | { type: 'END_SOCKET_SESSION' }
+  | { type: 'SET_PROVING_STRATEGY'; strategy: ProvingStrategy }
+  | { type: 'GET_PROVING_STRATEGY' }
+  | { type: 'RUN_BENCHMARK' }
+  | { type: 'GET_BENCHMARK' }
+  | { type: 'CANCEL_WASM_PROVE' };
 
 export type PopupResponse =
   | { type: 'STATE_UPDATE'; state: SerializedWalletState }
@@ -94,7 +102,11 @@ export type PopupResponse =
   | { type: 'EXPORT_CACHE_RESULT'; data: string }
   | { type: 'CONNECT_STATUS'; state: SocketState; sessionId?: string }
   | { type: 'WALLET_SWITCHED'; success: boolean }
-  | { type: 'ENVIRONMENT_SWITCHED'; success: boolean };
+  | { type: 'ENVIRONMENT_SWITCHED'; success: boolean }
+  | { type: 'PROVING_STATUS'; status: ProvingStatus }
+  | { type: 'PROVING_STRATEGY'; strategy: ProvingStrategy }
+  | { type: 'BENCHMARK_RESULT'; benchmark: DeviceBenchmark | null }
+  | { type: 'WASM_PROVE_CANCELLED'; success: boolean };
 
 export interface TransferRequest {
   tokenType: 'shielded' | 'unshielded';
@@ -148,7 +160,12 @@ export type OffscreenRequestType =
   | 'GET_CONNECT_STATUS'
   | 'GET_SOCKET_STATE'
   | 'END_SOCKET_SESSION'
-  | 'SOCKET_DAPP_RESPONSE';
+  | 'SOCKET_DAPP_RESPONSE'
+  | 'CANCEL_WASM_PROVE'
+  | 'SET_PROVING_STRATEGY'
+  | 'GET_PROVING_STRATEGY'
+  | 'RUN_BENCHMARK'
+  | 'GET_BENCHMARK';
 
 export interface OffscreenResponse {
   id: string;
@@ -158,7 +175,7 @@ export interface OffscreenResponse {
 
 export interface OffscreenBroadcast {
   id: null;
-  type: 'STATE_UPDATE' | 'DIAGNOSTIC_EVENT' | 'HEARTBEAT' | 'READY' | 'CONNECT_EVENT' | 'SOCKET_STATE_CHANGE' | 'SOCKET_DAPP_REQUEST';
+  type: 'STATE_UPDATE' | 'DIAGNOSTIC_EVENT' | 'HEARTBEAT' | 'READY' | 'CONNECT_EVENT' | 'SOCKET_STATE_CHANGE' | 'SOCKET_DAPP_REQUEST' | 'PROVING_STATUS';
   payload: unknown;
 }
 
