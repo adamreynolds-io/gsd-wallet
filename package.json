@@ -17,9 +17,9 @@
   },
   "dependencies": {
     "@midnight-ntwrk/dapp-connector-api": "4.0.1",
-    "@midnight-ntwrk/ledger-v8": "8.0.3",
-    "@midnight-ntwrk/wallet-sdk-facade": "3.0.0",
-    "@midnight-ntwrk/wallet-sdk-hd": "3.0.1",
+    "@midnight-ntwrk/ledger-v8": "8.1.0",
+    "@midnight-ntwrk/wallet-sdk-facade": "4.0.0",
+    "@midnight-ntwrk/wallet-sdk-hd": "3.0.2",
     "@scure/bip39": "2.0.1",
     "assert": "2.1.0",
     "buffer": "6.0.3",
