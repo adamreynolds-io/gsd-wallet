@@ -33,20 +33,20 @@ importers:
         specifier: 8.0.3
         version: 8.0.3
       react:
-        specifier: 19.2.4
-        version: 19.2.4
+        specifier: 19.2.6
+        version: 19.2.6
       react-dom:
-        specifier: 19.2.4
-        version: 19.2.4(react@19.2.4)
+        specifier: 19.2.6
+        version: 19.2.6(react@19.2.6)
       react-router-dom:
         specifier: 7.14.0
-        version: 7.14.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        version: 7.14.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       rxjs:
         specifier: 7.8.2
         version: 7.8.2
       zustand:
         specifier: 5.0.3
-        version: 5.0.3(@types/react@19.2.14)(react@19.2.4)
+        version: 5.0.3(@types/react@19.2.15)(react@19.2.6)
     devDependencies:
       '@crxjs/vite-plugin':
         specifier: 2.4.0
@@ -58,11 +58,11 @@ importers:
         specifier: 0.1.39
         version: 0.1.39
       '@types/react':
-        specifier: 19.2.14
-        version: 19.2.14
+        specifier: 19.2.15
+        version: 19.2.15
       '@types/react-dom':
         specifier: 19.2.3
-        version: 19.2.3(@types/react@19.2.14)
+        version: 19.2.3(@types/react@19.2.15)
       '@vitejs/plugin-react':
         specifier: 6.0.1
         version: 6.0.1(vite@8.0.4(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.6.0)(jiti@2.6.1))
@@ -686,8 +686,8 @@ packages:
     peerDependencies:
       '@types/react': ^19.2.0
 
-  '@types/react@19.2.14':
-    resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
+  '@types/react@19.2.15':
+    resolution: {integrity: sha512-eRwcGNHve+E8qtEQSSRl6urh+rFop4v8gm6O8rGv25CodbvFdLjA1vVQ1KkiFE0w0UPOnb8tDiFKL5lp0rtY5Q==}
 
   '@vitejs/plugin-react@6.0.1':
     resolution: {integrity: sha512-l9X/E3cDb+xY3SWzlG1MOGt2usfEHGMNIaegaUGFsLkb3RCn/k8/TOXBcab+OndDI4TBtktT8/9BwwW8Vi9KUQ==}
@@ -1289,10 +1289,10 @@ packages:
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
 
-  react-dom@19.2.4:
-    resolution: {integrity: sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ==}
+  react-dom@19.2.6:
+    resolution: {integrity: sha512-0prMI+hvBbPjsWnxDLxlCGyM8PN6UuWjEUCYmZhO67xIV9Xasa/r/vDnq+Xyq4Lo27g8QSbO5YzARu0D1Sps3g==}
     peerDependencies:
-      react: ^19.2.4
+      react: ^19.2.6
 
   react-refresh@0.13.0:
     resolution: {integrity: sha512-XP8A9BT0CpRBD+NYLLeIhld/RqG9+gktUjW1FkE+Vm7OCinbG1SshcK5tb9ls4kzvjZr9mOQc7HYgBngEyPAXg==}
@@ -1315,8 +1315,8 @@ packages:
       react-dom:
         optional: true
 
-  react@19.2.4:
-    resolution: {integrity: sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ==}
+  react@19.2.6:
+    resolution: {integrity: sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q==}
     engines: {node: '>=0.10.0'}
 
   reusify@1.1.0:
@@ -2390,11 +2390,11 @@ snapshots:
     dependencies:
       undici-types: 7.19.2
 
-  '@types/react-dom@19.2.3(@types/react@19.2.14)':
+  '@types/react-dom@19.2.3(@types/react@19.2.15)':
     dependencies:
-      '@types/react': 19.2.14
+      '@types/react': 19.2.15
 
-  '@types/react@19.2.14':
+  '@types/react@19.2.15':
     dependencies:
       csstype: 3.2.3
 
@@ -2952,28 +2952,28 @@ snapshots:
 
   queue-microtask@1.2.3: {}
 
-  react-dom@19.2.4(react@19.2.4):
+  react-dom@19.2.6(react@19.2.6):
     dependencies:
-      react: 19.2.4
+      react: 19.2.6
       scheduler: 0.27.0
 
   react-refresh@0.13.0: {}
 
-  react-router-dom@7.14.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+  react-router-dom@7.14.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6):
     dependencies:
-      react: 19.2.4
-      react-dom: 19.2.4(react@19.2.4)
-      react-router: 7.14.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      react: 19.2.6
+      react-dom: 19.2.6(react@19.2.6)
+      react-router: 7.14.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
 
-  react-router@7.14.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+  react-router@7.14.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6):
     dependencies:
       cookie: 1.1.1
-      react: 19.2.4
+      react: 19.2.6
       set-cookie-parser: 2.7.2
     optionalDependencies:
-      react-dom: 19.2.4(react@19.2.4)
+      react-dom: 19.2.6(react@19.2.6)
 
-  react@19.2.4: {}
+  react@19.2.6: {}
 
   reusify@1.1.0: {}
 
@@ -3163,7 +3163,7 @@ snapshots:
 
   ws@8.20.0: {}
 
-  zustand@5.0.3(@types/react@19.2.14)(react@19.2.4):
+  zustand@5.0.3(@types/react@19.2.15)(react@19.2.6):
     optionalDependencies:
-      '@types/react': 19.2.14
-      react: 19.2.4
+      '@types/react': 19.2.15
+      react: 19.2.6
